@@ -1,0 +1,10 @@
+[
+  {"slug": "ueda_onsen",        "name_en": "Ueda Onsen",        "name_ja": "上田温泉",       "note": "New location, opened 2026-07-31"},
+  {"slug": "hakuba",            "name_en": "Hakuba",            "name_ja": "白馬",           "note": ""},
+  {"slug": "togakushi",         "name_en": "Togakushi",         "name_ja": "戸隠",           "note": ""},
+  {"slug": "minakami_fujiwara", "name_en": "Minakami Fujiwara", "name_ja": "みなかみ藤原",   "note": ""},
+  {"slug": "minakami_hodaigi",  "name_en": "Minakami Hodaigi",  "name_ja": "みなかみ宝台樹", "note": ""},
+  {"slug": "shirakabako",       "name_en": "Shirakabako",       "name_ja": "白樺湖",         "note": ""},
+  {"slug": "nojiriko",          "name_en": "Nojiriko",          "name_ja": "野尻湖",         "note": ""},
+  {"slug": "kurohime",          "name_en": "Kurohime",          "name_ja": "黒姫",           "note": ""}
+]
