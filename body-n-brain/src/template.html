@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BODY N BRAIN</title>
+<style>
+  :root{
+    --bg:#0b0d14; --panel:#141824; --panel2:#1c2130; --line:#2b3245;
+    --ink:#e8ecf6; --dim:#8b95ad;
+    --blue:#4da3ff; --blue-d:#1e5fa8;
+    --red:#ff6b6b;  --red-d:#a83232;
+    --gold:#ffcc66; --ok:#5ee6a8;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:radial-gradient(1200px 800px at 50% -10%,#161d2e,var(--bg));
+    color:var(--ink); min-height:100vh;
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    display:flex; justify-content:center; padding:24px 16px 60px;
+  }
+  .wrap{width:100%; max-width:1040px}
+  header{text-align:center; margin-bottom:22px}
+  h1{
+    margin:0; font-size:clamp(28px,6vw,46px); letter-spacing:.14em; font-weight:800;
+    background:linear-gradient(90deg,var(--blue),#c3a8ff 55%,var(--red));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .tag{color:var(--dim); font-size:13px; letter-spacing:.22em; margin-top:6px}
+
+  .cols{display:grid; grid-template-columns:minmax(0,1fr) 320px; gap:22px; align-items:start}
+  @media (max-width:820px){ .cols{grid-template-columns:1fr} }
+
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px}
+
+  /* ---- board ---- */
+  .boardwrap{display:flex; flex-direction:column; align-items:center; gap:12px}
+  .status{
+    display:flex; align-items:center; gap:10px; font-weight:700; font-size:15px;
+    padding:9px 16px; border-radius:999px; background:var(--panel2); border:1px solid var(--line);
+  }
+  .dot{width:12px;height:12px;border-radius:50%}
+  .board{
+    display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
+    background:var(--panel2); padding:10px; border-radius:16px; border:1px solid var(--line);
+    width:min(92vw,440px); aspect-ratio:1;
+    box-shadow:0 24px 60px rgba(0,0,0,.55);
+  }
+  .cell{
+    position:relative; border-radius:10px; background:#20263a; cursor:pointer;
+    display:flex; align-items:center; justify-content:center; transition:background .12s;
+  }
+  .cell.dark{background:#1a1f31}
+  .cell.goal0{box-shadow:inset 0 0 0 2px rgba(77,163,255,.28)}
+  .cell.goal1{box-shadow:inset 0 0 0 2px rgba(255,107,107,.28)}
+  .cell .coord{position:absolute; left:5px; top:3px; font-size:9px; color:#4d566e; pointer-events:none}
+  .cell.sel{background:#2f3a58; box-shadow:inset 0 0 0 2px var(--gold)}
+  .cell.lastfrom,.cell.lastto{background:#2a3149}
+
+  .marker{position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none}
+  .marker i{width:26%; height:26%; border-radius:50%; background:rgba(255,255,255,.30); display:block}
+  .marker.cap i{width:82%; height:82%; border-radius:12px; background:transparent; border:3px solid #ff9d3c}
+  .marker.mount i{width:82%; height:82%; border-radius:12px; background:transparent; border:3px solid var(--ok)}
+  .marker.tack i{
+    width:82%; height:82%; border-radius:12px; background:transparent;
+    border:3px dashed var(--red); animation:pulse 1.1s infinite;
+  }
+  @keyframes pulse{50%{opacity:.35}}
+
+  /* ---- pieces ---- */
+  .piece{position:relative; width:78%; height:78%; display:flex; align-items:center; justify-content:center}
+  .body{
+    position:absolute; inset:0; border-radius:12px;
+    background:linear-gradient(160deg,var(--c1),var(--c2));
+    box-shadow:0 6px 0 var(--c3), 0 10px 16px rgba(0,0,0,.5);
+  }
+  .brain{
+    position:relative; width:52%; height:52%; border-radius:50%;
+    background:radial-gradient(circle at 34% 30%,#fff,var(--c1) 62%,var(--c2));
+    box-shadow:0 3px 10px rgba(0,0,0,.55), 0 0 0 2px rgba(255,255,255,.20);
+  }
+  .brain::after{
+    content:""; position:absolute; inset:26%; border-radius:50%;
+    border:2px solid rgba(0,0,0,.28); border-bottom-color:transparent;
+  }
+  .piece.stacked .brain{transform:translateY(-13%); box-shadow:0 8px 14px rgba(0,0,0,.6), 0 0 0 2px rgba(255,255,255,.28)}
+  .piece.stacked .body{inset:6% 0 0 0}
+  .p0{--c1:#6fb6ff;--c2:#2f74c8;--c3:#17457c}
+  .p1{--c1:#ff8f8f;--c2:#d14545;--c3:#8a2626}
+  .lonebrain{filter:drop-shadow(0 0 7px rgba(255,255,255,.22))}
+
+  /* ---- controls ---- */
+  .modebar{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; min-height:38px}
+  .modebar .hint{color:var(--dim); font-size:12px; align-self:center}
+  button{
+    font:inherit; font-size:13px; font-weight:700; color:var(--ink); cursor:pointer;
+    background:var(--panel2); border:1px solid var(--line); border-radius:9px; padding:8px 13px;
+    transition:.12s;
+  }
+  button:hover{border-color:#4a5570; background:#252b3d}
+  button.on{background:var(--gold); color:#20180a; border-color:var(--gold)}
+  button:disabled{opacity:.4; cursor:default}
+  .row{display:flex; gap:8px; flex-wrap:wrap; align-items:center}
+  select{
+    font:inherit; font-size:13px; background:var(--panel2); color:var(--ink);
+    border:1px solid var(--line); border-radius:9px; padding:7px 9px;
+  }
+  label{font-size:12px; color:var(--dim)}
+
+  h2{font-size:13px; letter-spacing:.16em; color:var(--dim); margin:0 0 10px; font-weight:700}
+  .log{height:170px; overflow:auto; font-size:12px; line-height:1.75; font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .log div{padding:1px 0; color:var(--dim)}
+  .log div.b{color:var(--blue)} .log div.r{color:var(--red)}
+  .rules{font-size:12.5px; line-height:1.85; color:#c3cbdd}
+  .rules b{color:var(--gold)} .rules code{color:var(--ok)}
+  .rules ul{margin:6px 0 12px; padding-left:18px}
+
+  .banner{
+    position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    background:rgba(6,8,14,.78); z-index:9; backdrop-filter:blur(3px);
+  }
+  .banner.show{display:flex}
+  .banner .box{background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:34px 42px; text-align:center}
+  .banner h3{margin:0 0 6px; font-size:30px; letter-spacing:.08em}
+  .banner p{margin:0 0 20px; color:var(--dim); font-size:14px; max-width:340px}
+  .banner .box button + button{margin-left:10px}
+  .log div.meta{color:var(--gold)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>BODY N BRAIN</h1>
+    <div class="tag">4 × 4 ・ 乗せると、性質が変わる</div>
+  </header>
+
+  <div class="cols">
+    <div class="card boardwrap">
+      <div class="status"><span class="dot" id="turnDot"></span><span id="turnText">BLUE の手番</span></div>
+      <div class="board" id="board"></div>
+      <div class="modebar" id="modebar"><span class="hint">駒をクリックして動かします</span></div>
+      <div class="row" style="justify-content:center">
+        <button id="newGame">新規対局</button>
+        <button id="undo">待った</button>
+        <label>相手 <select id="opponent">
+          <option value="ai">AI (RED)</option>
+          <option value="human">人間 (2人対戦)</option>
+        </select></label>
+        <label><input type="checkbox" id="swapRule" checked> スワップ</label>
+        <label>強さ <select id="level">
+          <option value="2">やさしい</option>
+          <option value="3" selected>ふつう</option>
+          <option value="4">つよい</option>
+          <option value="5">鬼</option>
+        </select></label>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column; gap:22px">
+      <div class="card">
+        <h2>棋譜</h2>
+        <div class="log" id="log"></div>
+      </div>
+      <div class="card">
+        <h2>ルール</h2>
+        <div class="rules" id="rules"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="banner" id="banner"><div class="box">
+  <h3 id="bannerTitle"></h3><p id="bannerText"></p>
+  <button id="bannerBtn">もう一局</button>
+  <button id="bannerUndo">待った</button>
+</div></div>
+
+<script>
+/*__ENGINE__*/
+/*__AI__*/
+/*__UI__*/
+</script>
+</body>
+</html>
