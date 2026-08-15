@@ -133,7 +133,7 @@
   .banner .box{background:var(--panel); border:1px solid var(--line); border-radius:18px; padding:34px 42px; text-align:center}
   .banner h3{margin:0 0 6px; font-size:30px; letter-spacing:.08em}
   .banner p{margin:0 0 20px; color:var(--dim); font-size:14px; max-width:340px}
-  .banner .box button + button{margin-left:10px}
+  .banner #bannerBtns{display:flex; gap:10px; justify-content:center; flex-wrap:wrap}
   .log div.meta{color:var(--gold)}
 </style>
 </head>
@@ -153,7 +153,7 @@
         <button id="newGame">新規対局</button>
         <button id="undo">待った</button>
         <label>相手 <select id="opponent">
-          <option value="ai">AI (RED)</option>
+          <option value="ai">AI</option>
           <option value="human">人間 (2人対戦)</option>
         </select></label>
         <label><input type="checkbox" id="swapRule" checked> スワップ</label>
@@ -181,8 +181,7 @@
 
 <div class="banner" id="banner"><div class="box">
   <h3 id="bannerTitle"></h3><p id="bannerText"></p>
-  <button id="bannerBtn">もう一局</button>
-  <button id="bannerUndo">待った</button>
+  <div id="bannerBtns"></div>
 </div></div>
 
 <script>

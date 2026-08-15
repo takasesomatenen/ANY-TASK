@@ -35,6 +35,30 @@ function newGame() {
 
 const vsAI = () => $("opponent").value === "ai";
 const aiToMove = () => vsAI() && state.turn === aiSide;
+/** The colour the person at the keyboard is playing. */
+const humanSide = () => (vsAI() ? 1 - aiSide : 0);
+/** Keep the human's own back rank at the bottom, even after a swap. */
+const flipped = () => humanSide() === 1;
+
+/** Only swap on a real advantage — never on evaluation noise. */
+const SWAP_MARGIN = 20;
+
+function showBanner(title, colour, text, buttons) {
+  $("bannerTitle").textContent = title;
+  $("bannerTitle").style.color = colour;
+  $("bannerText").textContent = text;
+  const box = $("bannerBtns");
+  box.innerHTML = "";
+  for (const [label, fn] of buttons) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.onclick = fn;
+    box.appendChild(b);
+  }
+  $("banner").classList.add("show");
+}
+
+const closeBanner = () => $("banner").classList.remove("show");
 
 // --- move helpers ----------------------------------------------------------
 
@@ -69,8 +93,13 @@ function render() {
   for (const m of offered()) marks.set(targetOf(m), m);
 
   boardEl.innerHTML = "";
-  for (let y = H - 1; y >= 0; y--) {
-    for (let x = 0; x < W; x++) {
+  const flip = flipped();
+  for (let row = 0; row < H; row++) {
+    for (let col = 0; col < W; col++) {
+      // 180-degree rotation when the human plays RED, so their own pieces are
+      // always the ones nearest to them.
+      const y = flip ? row : H - 1 - row;
+      const x = flip ? W - 1 - col : col;
       const i = idx(x, y);
       const cell = document.createElement("div");
       cell.className = "cell" + ((x + y) % 2 ? " dark" : "");
@@ -174,6 +203,22 @@ function resolveSwap(doSwap) {
     logEl.appendChild(d);
   }
   render();
+
+  // Losing your colour on move one is bewildering unless it is spelled out.
+  if (doSwap && vsAI()) {
+    const you = humanSide() === 0 ? "BLUE（先手）" : "RED（後手）";
+    showBanner(
+      "スワップ発動",
+      "var(--gold)",
+      `AI があなたの初手を見て陣営を入れ替えました。あなたは ${you} です。` +
+        `盤はあなたの陣が手前に来るよう反転しています。`,
+      [["対局を続ける", () => {
+        closeBanner();
+        if (aiToMove()) aiTurn();
+      }]]
+    );
+    return;
+  }
   if (aiToMove()) aiTurn();
 }
 
@@ -229,9 +274,10 @@ function aiSwapDecision() {
   render();
   setTimeout(() => {
     const depth = Math.max(2, Number($("level").value) - 1);
-    // Take the swap when the position already looks better for the side that
-    // has just moved.
-    const take = search(state, depth, 1 - state.turn).score > 0;
+    // Take the swap only when the opening gave the first player a real edge.
+    // A bare > 0 test swaps on evaluation noise, which reads to the player as
+    // the game taking their colour away for no reason.
+    const take = search(state, depth, 1 - state.turn).score > SWAP_MARGIN;
     busy = false;
     resolveSwap(take);
   }, 260);
@@ -258,14 +304,24 @@ const REASONS = {
 function finish() {
   const w = state.winner;
   const j = judge(state);
-  $("bannerTitle").textContent = w === -1 ? "引き分け" : (w === 0 ? "BLUE" : "RED") + " の勝ち";
-  $("bannerTitle").style.color = w === -1 ? "var(--gold)" : w === 0 ? "var(--blue)" : "var(--red)";
+  const side = w === 0 ? "BLUE" : "RED";
+  const tail = vsAI() && w !== -1 ? `（${w === humanSide() ? "あなた" : "AI"}）` : "";
   const detail =
     state.reason === "repetition" || state.reason === "judgement"
       ? `（侵攻度 ${j.depth[0]} 対 ${j.depth[1]}＋コミ${j.komi}、BODY ${j.bodies[0]} 対 ${j.bodies[1]}）`
       : "";
-  $("bannerText").textContent = (REASONS[state.reason] || "") + detail;
-  $("banner").classList.add("show");
+  showBanner(
+    w === -1 ? "引き分け" : `${side} の勝ち${tail}`,
+    w === -1 ? "var(--gold)" : w === 0 ? "var(--blue)" : "var(--red)",
+    (REASONS[state.reason] || "") + detail,
+    [
+      ["もう一局", newGame],
+      ["待った", () => {
+        closeBanner();
+        undo();
+      }],
+    ]
+  );
 }
 
 function popOne() {
@@ -277,23 +333,24 @@ function popOne() {
 function undo() {
   if (!history.length || busy || swapPending) return;
   popOne();
+  // Rewinding past the swap decision must also give the colours back.
+  if (state.ply <= 1 && swapUsed) {
+    if (humanSide() === 1) aiSide = 1 - aiSide;
+    swapUsed = false;
+  }
   while (history.length && aiToMove()) popOne();
   sel = null;
   lastMove = null;
-  $("banner").classList.remove("show");
+  closeBanner();
   render();
 }
 
 $("newGame").onclick = newGame;
-$("bannerBtn").onclick = newGame;
 $("undo").onclick = undo;
-$("bannerUndo").onclick = () => {
-  $("banner").classList.remove("show");
-  undo();
-};
 $("opponent").onchange = newGame;
+$("swapRule").onchange = newGame;
 $("banner").onclick = (e) => {
-  if (e.target === $("banner")) $("banner").classList.remove("show");
+  if (e.target === $("banner")) closeBanner();
 };
 
 $("rules").innerHTML = `
