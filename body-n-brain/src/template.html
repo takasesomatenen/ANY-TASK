@@ -14,8 +14,11 @@
   }
   *{box-sizing:border-box}
   body{
-    margin:0; background:radial-gradient(1200px 800px at 50% -10%,#161d2e,var(--bg));
-    color:var(--ink); min-height:100vh;
+    margin:0; color:var(--ink); min-height:100vh;
+    /* explicit colour as well as the gradient: the host paints its own ground
+       behind the page, and a transparent body would borrow it */
+    background-color:var(--bg);
+    background-image:radial-gradient(1200px 800px at 50% -10%,#161d2e,var(--bg));
     font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
     display:flex; justify-content:center; padding:24px 16px 60px;
   }
@@ -43,7 +46,7 @@
   .board{
     display:grid; grid-template-columns:repeat(4,1fr); gap:6px;
     background:var(--panel2); padding:10px; border-radius:16px; border:1px solid var(--line);
-    width:min(92vw,440px); aspect-ratio:1;
+    width:min(100%,440px); aspect-ratio:1;
     box-shadow:0 24px 60px rgba(0,0,0,.55);
   }
   .cell{
@@ -66,6 +69,13 @@
     border:3px dashed var(--red); animation:pulse 1.1s infinite;
   }
   @keyframes pulse{50%{opacity:.35}}
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation:none !important; transition:none !important}
+    .marker.tack i{border-style:solid}
+  }
+  .cell:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{
+    outline:2px solid var(--gold); outline-offset:2px;
+  }
 
   /* ---- pieces ---- */
   .piece{position:relative; width:78%; height:78%; display:flex; align-items:center; justify-content:center}
