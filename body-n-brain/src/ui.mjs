@@ -411,12 +411,21 @@ function resolveSwap(doSwap) {
   if (aiToMove()) aiTurn();
 }
 
+/** Plies during which the AI deliberately varies its choice. */
+const OPENING_PLIES = 8;
+const OPENING_TEMP = 0.35;
+
 function aiTurn() {
   busy = true;
   render();
   setTimeout(() => {
     const depth = Number($("level").value);
-    const m = chooseMove(state, depth, Math.random, depth <= 2 ? 0.5 : 0.06);
+    const base = depth <= 2 ? 0.5 : 0.06;
+    // At near-zero temperature the AI replays the same opening every game, so
+    // every game starts identically. Spread the first few moves across the
+    // options it considers near-equal.
+    const temp = state.ply < OPENING_PLIES ? Math.max(base, OPENING_TEMP) : base;
+    const m = chooseMove(state, depth, Math.random, temp);
     busy = false;
     play(m);
   }, 200);

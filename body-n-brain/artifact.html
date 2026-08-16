@@ -334,7 +334,7 @@ const DEFAULT_RULES = {
   invasion: "lone", // 'none' | 'lone' | 'any' — only a dismounted BRAIN scores
   invasionSurvive: 1, // own turn-starts the BRAIN must survive on the goal rank
   komi: 0.5, // judgement bonus for RED, compensating BLUE's first move
-  openingTax: true, // BLUE's first move must be a plain BODY step (no mount)
+  openingTax: "body", // 'off' / 'body' / 'nomount' / 'both' — see legalMoves
   maxPly: 120,
 };
 
@@ -523,10 +523,19 @@ function legalMoves(s, player = s.turn) {
     }
   }
 
-  if (r.openingTax && s.ply === 0 && me === 0) {
-    // BLUE pays for the initiative: its opening move must be a plain BODY step
-    const taxed = moves.filter((m) => m.kind === "body" && !m.mount);
-    if (taxed.length) return taxed;
+  // Opening tax — the first player pays something for the initiative.
+  //   'off'    no restriction
+  //   'body'   BLACK's first move must be a plain BODY step (harshest)
+  //   'nomount' BLACK's first move may be anything except combining
+  //   'both'   NEITHER player may combine on their first move (symmetric)
+  const tax = r.openingTax;
+  if (tax && tax !== "off" && s.ply <= (tax === "both" ? 1 : 0)) {
+    const mine = tax === "both" || me === 0;
+    if (mine) {
+      const taxed =
+        tax === "body" ? moves.filter((m) => m.kind === "body" && !m.mount) : moves.filter((m) => !m.mount);
+      if (taxed.length) return taxed;
+    }
   }
   return moves;
 }
@@ -1152,12 +1161,21 @@ function resolveSwap(doSwap) {
   if (aiToMove()) aiTurn();
 }
 
+/** Plies during which the AI deliberately varies its choice. */
+const OPENING_PLIES = 8;
+const OPENING_TEMP = 0.35;
+
 function aiTurn() {
   busy = true;
   render();
   setTimeout(() => {
     const depth = Number($("level").value);
-    const m = chooseMove(state, depth, Math.random, depth <= 2 ? 0.5 : 0.06);
+    const base = depth <= 2 ? 0.5 : 0.06;
+    // At near-zero temperature the AI replays the same opening every game, so
+    // every game starts identically. Spread the first few moves across the
+    // options it considers near-equal.
+    const temp = state.ply < OPENING_PLIES ? Math.max(base, OPENING_TEMP) : base;
+    const m = chooseMove(state, depth, Math.random, temp);
     busy = false;
     play(m);
   }, 200);
