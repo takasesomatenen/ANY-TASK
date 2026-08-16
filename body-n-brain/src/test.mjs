@@ -61,17 +61,38 @@ const find = (s, pred) => legalMoves(s).find(pred);
   }
 }
 
-// --- opening tax -----------------------------------------------------------
+// --- opening: the mount ban, and the (now off by default) opening tax ------
 {
-  const s = initialState(makeRules());
-  const kinds = new Set(legalMoves(s).map((m) => m.kind));
-  ok("opening tax: BLUE's first move is BODY-only", kinds.size === 1 && kinds.has("body"));
+  const rules = makeRules();
+  ok("mount ban is on by default", rules.mountBan > 0);
+  ok("opening tax is off by default", rules.openingTax === "off");
+
+  // neither side may combine while the ban is running, and both keep the same
+  // kinds of move available — no asymmetry
+  let s = initialState(rules);
+  for (let ply = 0; ply < rules.mountBan; ply++) {
+    const ms = legalMoves(s);
+    ok(`ply ${ply}: nobody may combine`, ms.every((m) => !m.mount));
+    ok(`ply ${ply}: BODY and BRAIN moves both available`, new Set(ms.map((m) => m.kind)).size > 1);
+    s = applyMove(s, ms[0]);
+  }
+  ok("combining becomes legal once the ban expires", legalMoves(s).some((m) => m.mount));
+
+  // both sides get the same number of opening moves
+  const fresh = initialState(rules);
   ok(
-    "opening tax: no mounting on move 1",
-    legalMoves(s).every((m) => !m.mount)
+    "both sides have the same opening options",
+    legalMoves(fresh, 0).length === legalMoves(fresh, 1).length
   );
-  const after = applyMove(s, legalMoves(s)[0]);
-  ok("opening tax: RED is unrestricted", new Set(legalMoves(after).map((m) => m.kind)).size > 1);
+
+  // the tax still works when a variant turns it on
+  const taxed = initialState(makeRules({ openingTax: "body", mountBan: 0 }));
+  const kinds = new Set(legalMoves(taxed).map((m) => m.kind));
+  ok("opening tax 'body' restricts BLUE to plain BODY steps", kinds.size === 1 && kinds.has("body"));
+  ok(
+    "opening tax leaves RED unrestricted",
+    new Set(legalMoves(applyMove(taxed, legalMoves(taxed)[0])).map((m) => m.kind)).size > 1
+  );
 }
 
 // --- mounting --------------------------------------------------------------

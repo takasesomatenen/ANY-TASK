@@ -334,7 +334,8 @@ const DEFAULT_RULES = {
   invasion: "lone", // 'none' | 'lone' | 'any' — only a dismounted BRAIN scores
   invasionSurvive: 1, // own turn-starts the BRAIN must survive on the goal rank
   komi: 0.5, // judgement bonus for RED, compensating BLUE's first move
-  openingTax: "body", // 'off' / 'body' / 'nomount' / 'both' — see legalMoves
+  openingTax: "off", // 'off' / 'body' / 'nomount' / 'both' — see legalMoves
+  mountBan: 4, // plies during which NOBODY may combine, to open up the opening
   maxPly: 120,
 };
 
@@ -521,6 +522,14 @@ function legalMoves(s, player = s.turn) {
         }
       }
     }
+  }
+
+  // Combining is so strong that, unrestricted, it is the only sensible opening
+  // and every game starts the same way. Holding it back for a few plies turns
+  // the opening into a question of development, where many moves are near-equal.
+  if (r.mountBan && s.ply < r.mountBan) {
+    const free = moves.filter((m) => !m.mount);
+    if (free.length) return free;
   }
 
   // Opening tax — the first player pays something for the initiative.
@@ -1046,8 +1055,10 @@ function renderModebar() {
   const s = document.createElement("span");
   s.className = "hint";
   s.textContent =
-    state.ply === 0 && RULES.openingTax
-      ? "先手の初手は BODY を1マス動かすだけ（先手のコミ）"
+    state.ply < RULES.mountBan
+      ? `序盤 ${RULES.mountBan} 手は合体できません — まず駒組み（あと${
+          RULES.mountBan - state.ply
+        }手）`
       : sel === null
       ? "駒をクリック → 行き先をクリック"
       : "行き先をクリック";
@@ -1272,7 +1283,9 @@ $("rules").innerHTML = `<dl>
   行き先が盤外・他の駒なら撃墜＝勝ち。突撃側は動かない。</dd>
 <dt>勝ち方は2つ</dt><dd>相手の BRAIN を取る。または単体の BRAIN を敵陣最奥に立たせ、相手の1手を生き延びる。</dd>
 <dt>判定</dt><dd>千日手・${RULES.maxPly}手で判定。BRAIN がより深い側の勝ち、同じなら BODY の多い側。後手にコミ ${RULES.komi}。</dd>
-<dt>先後の調整</dt><dd>先手の初手は BODY 移動のみ。さらに後手は初手を見てから陣営を入れ替えられる（スワップ）。</dd>
+<dt>序盤の合体禁止</dt><dd>最初の ${RULES.mountBan} 手（各2手）は<b>両者とも合体できません</b>。
+  合体が強すぎて、無ければ初手が1通りに固定されてしまうため。おかげで初手はどれを選んでも互角です。</dd>
+<dt>先後の調整</dt><dd>後手は先手の初手を見てから陣営を入れ替えられる（スワップ）。</dd>
 </dl>`;
 
 $("newGame").onclick = newGame;

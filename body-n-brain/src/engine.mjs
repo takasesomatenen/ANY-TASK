@@ -72,7 +72,8 @@ export const DEFAULT_RULES = {
   invasion: "lone", // 'none' | 'lone' | 'any' — only a dismounted BRAIN scores
   invasionSurvive: 1, // own turn-starts the BRAIN must survive on the goal rank
   komi: 0.5, // judgement bonus for RED, compensating BLUE's first move
-  openingTax: "body", // 'off' / 'body' / 'nomount' / 'both' — see legalMoves
+  openingTax: "off", // 'off' / 'body' / 'nomount' / 'both' — see legalMoves
+  mountBan: 4, // plies during which NOBODY may combine, to open up the opening
   maxPly: 120,
 };
 
@@ -259,6 +260,14 @@ export function legalMoves(s, player = s.turn) {
         }
       }
     }
+  }
+
+  // Combining is so strong that, unrestricted, it is the only sensible opening
+  // and every game starts the same way. Holding it back for a few plies turns
+  // the opening into a question of development, where many moves are near-equal.
+  if (r.mountBan && s.ply < r.mountBan) {
+    const free = moves.filter((m) => !m.mount);
+    if (free.length) return free;
   }
 
   // Opening tax — the first player pays something for the initiative.
