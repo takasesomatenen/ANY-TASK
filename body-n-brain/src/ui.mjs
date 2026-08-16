@@ -114,29 +114,12 @@ function tutorialAdvance() {
   teach.i += 1;
   if (teach.i >= TUTORIAL.length) {
     teach = null;
-    rememberTutorialDone();
     showVeil("チュートリアル終了", "7つのルールはこれで全部です。実戦へどうぞ。", [
       ["対局を始める", () => (closeVeil(), newGame()), true],
     ]);
     return;
   }
   loadTutorialStep();
-}
-
-const TEACH_KEY = "bodynbrain.taught";
-function tutorialWasDone() {
-  try {
-    return localStorage.getItem(TEACH_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-function rememberTutorialDone() {
-  try {
-    localStorage.setItem(TEACH_KEY, "1");
-  } catch {
-    /* private mode — just replay the tutorial next time */
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -285,9 +268,8 @@ function renderModebar() {
       s.textContent = "印のついたマスをクリック";
       modebarEl.appendChild(s);
     }
-    add("スキップ", () => {
+    add("やめる", () => {
       teach = null;
-      rememberTutorialDone();
       newGame();
     });
     return;
@@ -543,5 +525,5 @@ $("veil").onclick = (e) => {
   if (e.target === $("veil")) closeVeil();
 };
 
-if (tutorialWasDone()) newGame();
-else startTutorial();
+// The tutorial no longer opens by itself — it is on the チュートリアル button.
+newGame();
