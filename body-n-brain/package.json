@@ -1,0 +1,13 @@
+{
+  "name": "body-n-brain",
+  "version": "1.0.0",
+  "description": "4x4 abstract strategy game where stacking a BRAIN on a BODY changes how the piece moves",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node src/test.mjs",
+    "balance": "node src/balance.mjs 200 4 0.15",
+    "sweep": "node src/sweep.mjs 60 3"
+  }
+}

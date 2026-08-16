@@ -1,0 +1,1349 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BODY N BRAIN</title>
+<style>
+  /* Monochrome by design: the two sides are told apart by fill, not hue —
+     solid pieces are BLACK, outlined pieces are WHITE. Every colour is a token
+     so the same drawing works on a light or a dark ground. */
+  :root{
+    --paper:#ffffff;
+    --soft:#f3f3f5;
+    --line:#d6d6dc;
+    --ink:#15151a;
+    --muted:#74747f;
+    --grid:1px;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#0e0e11;
+      --soft:#17171c;
+      --line:#33333c;
+      --ink:#f0f0f3;
+      --muted:#8b8b96;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0e0e11;
+    --soft:#17171c;
+    --line:#33333c;
+    --ink:#f0f0f3;
+    --muted:#8b8b96;
+  }
+
+  *{box-sizing:border-box}
+  body{
+    margin:0; background-color:var(--paper); color:var(--ink);
+    font-family:"Hiragino Kaku Gothic ProN","Yu Gothic","Noto Sans JP",
+                -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    font-size:14px; line-height:1.75;
+    display:flex; justify-content:center; padding:32px 16px 64px;
+  }
+  .wrap{width:100%; max-width:940px; display:flex; flex-direction:column; gap:26px}
+
+  header{text-align:center; display:flex; flex-direction:column; gap:8px}
+  h1{
+    margin:0; font-size:clamp(22px,5vw,34px); font-weight:700;
+    letter-spacing:.30em; text-indent:.30em; text-wrap:balance;
+  }
+  .tag{
+    color:var(--muted); font-size:11px; letter-spacing:.20em;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+
+  .cols{display:grid; grid-template-columns:minmax(0,1fr) 280px; gap:28px; align-items:start}
+  @media (max-width:880px){ .cols{grid-template-columns:1fr} }
+
+  .stage{display:flex; flex-direction:column; align-items:center; gap:16px}
+
+  /* --- instruction / status bar --- */
+  .bar{
+    width:100%; max-width:520px; min-height:64px;
+    border:var(--grid) solid var(--line); border-radius:2px;
+    padding:12px 16px; display:flex; gap:14px; align-items:center;
+  }
+  .bar.teach{border-color:var(--ink); border-width:2px}
+  .step{
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11px;
+    letter-spacing:.1em; color:var(--muted); white-space:nowrap; padding-top:2px;
+  }
+  .bar p{margin:0; font-size:13px; line-height:1.7}
+  .bar b{font-weight:700}
+  .turnmark{width:16px; height:16px; flex:0 0 16px; border:2px solid var(--ink); border-radius:50%}
+  .turnmark.solid{background:var(--ink)}
+
+  /* --- board --- */
+  .board{
+    display:grid; width:min(100%,480px); aspect-ratio:1;
+    border:2px solid var(--ink); background:var(--line);
+    gap:var(--grid);
+  }
+  .cell{
+    position:relative; background:var(--paper); cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .cell.alt{background:var(--soft)}
+  .cell.goal::before{
+    content:""; position:absolute; inset:0;
+    background:repeating-linear-gradient(45deg,transparent 0 5px,var(--line) 5px 6px);
+    opacity:.9; pointer-events:none;
+  }
+  .cell .coord{
+    position:absolute; left:3px; top:1px; font-size:8px; color:var(--muted); opacity:.55;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; pointer-events:none;
+  }
+  .cell.sel{outline:3px solid var(--ink); outline-offset:-3px}
+  .cell.last{background:var(--soft)}
+  .cell.last.alt{background:var(--paper)}
+  .cell.teachtarget{animation:blink 1.4s infinite}
+  @keyframes blink{50%{background:var(--soft)}}
+
+  /* --- pieces: solid = BLACK, outlined = WHITE --- */
+  .piece{position:relative; width:72%; height:72%}
+  .pbody{
+    position:absolute; left:0; right:0; bottom:0; top:0; border-radius:2px;
+    border:2px solid var(--ink);
+  }
+  .pbrain{
+    position:absolute; left:50%; width:46%; aspect-ratio:1; transform:translateX(-50%);
+    top:27%; border-radius:50%; border:2px solid var(--ink); background:var(--paper);
+  }
+  .p0 .pbody{background:var(--ink)}
+  .p0 .pbrain{background:var(--ink)}
+  .p1 .pbody{background:var(--paper)}
+  .p1 .pbrain{background:var(--paper)}
+  /* a solid BRAIN needs a rim so it stays visible on top of a solid BODY */
+  .stacked .pbody{top:16%}
+  .stacked .pbrain{top:-4%; box-shadow:0 0 0 3px var(--paper)}
+  .p1.stacked .pbrain{box-shadow:0 0 0 3px var(--ink)}
+  .lone .pbrain{top:27%}
+
+  /* --- move markers: shape-coded, since colour is not available.
+     Each carries a paper-coloured halo so it stays readable when it lands on
+     top of a solid piece. --- */
+  .mk{position:absolute; inset:0; pointer-events:none; z-index:2;
+      display:flex; align-items:center; justify-content:center}
+  .mk-move i{
+    display:block; width:18%; aspect-ratio:1; border-radius:50%;
+    background:var(--ink); box-shadow:0 0 0 2px var(--paper);
+  }
+  .mk-mount i, .mk-mount i::after{
+    display:block; border:2px solid var(--ink); border-radius:50%;
+    box-shadow:0 0 0 2px var(--paper), inset 0 0 0 2px var(--paper);
+  }
+  .mk-mount i{width:70%; aspect-ratio:1; position:relative}
+  .mk-mount i::after{content:""; position:absolute; inset:24%}
+  .mk-take i, .mk-take i::after{
+    display:block; width:70%; height:3px; border-radius:2px;
+    background:var(--ink); box-shadow:0 0 0 2px var(--paper);
+  }
+  .mk-take i{transform:rotate(45deg); position:relative}
+  /* width:100% keeps the second stroke exactly as long as the first */
+  .mk-take i::after{content:""; position:absolute; left:0; top:0; width:100%; transform:rotate(-90deg)}
+  .mk-tackle i{
+    display:block; width:78%; aspect-ratio:1;
+    border:3px dashed var(--ink); border-radius:2px;
+    box-shadow:0 0 0 2px var(--paper), inset 0 0 0 2px var(--paper);
+    animation:pulse 1.1s infinite;
+  }
+  @keyframes pulse{50%{opacity:.3}}
+
+  /* --- controls --- */
+  .row{display:flex; gap:8px; flex-wrap:wrap; justify-content:center; align-items:center}
+  button{
+    font:inherit; font-size:12.5px; color:var(--ink); cursor:pointer;
+    background:var(--paper); border:var(--grid) solid var(--line); border-radius:2px;
+    padding:8px 14px;
+  }
+  button:hover:not(:disabled){border-color:var(--ink)}
+  button.primary{background:var(--ink); color:var(--paper); border-color:var(--ink)}
+  button.on{background:var(--ink); color:var(--paper); border-color:var(--ink)}
+  button:disabled{opacity:.35; cursor:default}
+  select{
+    font:inherit; font-size:12.5px; background:var(--paper); color:var(--ink);
+    border:var(--grid) solid var(--line); border-radius:2px; padding:7px 8px;
+  }
+  label{font-size:11.5px; color:var(--muted); display:inline-flex; align-items:center; gap:5px}
+  .modebar{min-height:34px; display:flex; gap:8px; flex-wrap:wrap; justify-content:center; align-items:center}
+  .hint{color:var(--muted); font-size:12px; text-align:center}
+  :focus-visible{outline:2px solid var(--ink); outline-offset:2px}
+
+  /* --- side panels --- */
+  .panel{border:var(--grid) solid var(--line); border-radius:2px; padding:14px 16px}
+  .panel + .panel{margin-top:20px}
+  h2{
+    font-size:10.5px; letter-spacing:.18em; color:var(--muted); margin:0 0 10px;
+    font-weight:700; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  .log{
+    height:150px; overflow:auto; font-size:11.5px; line-height:1.85;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-variant-numeric:tabular-nums;
+  }
+  .log div{color:var(--muted)}
+  .log div.b{color:var(--ink)}
+  .log div.meta{font-style:italic}
+  .rules{font-size:12.5px; line-height:1.9}
+  .rules dt{font-weight:700; margin-top:11px}
+  .rules dd{margin:1px 0 0; color:var(--muted)}
+  .rules dl{margin:0}
+
+  .legend{display:grid; grid-template-columns:auto 1fr; gap:7px 11px; align-items:center; font-size:11.5px; color:var(--muted)}
+  .legend .sw{
+    position:relative; width:28px; height:28px; border:var(--grid) solid var(--line);
+    display:flex; align-items:center; justify-content:center; flex:0 0 28px;
+  }
+  .legend .sw .piece{width:64%; height:64%}
+
+  /* --- overlay --- */
+  .veil{
+    position:fixed; inset:0; display:none; align-items:center; justify-content:center;
+    background:color-mix(in srgb, var(--paper) 82%, transparent); z-index:9; padding:20px;
+  }
+  .veil.show{display:flex}
+  .veil .box{
+    background:var(--paper); border:2px solid var(--ink); border-radius:2px;
+    padding:30px 34px; text-align:center; max-width:400px;
+  }
+  .veil h3{margin:0 0 8px; font-size:20px; letter-spacing:.06em}
+  .veil p{margin:0 0 20px; color:var(--muted); font-size:13px}
+
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation:none !important; transition:none !important}
+    .mk-tackle i{border-style:solid}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>BODY N BRAIN</h1>
+    <div class="tag" id="tagline">6 × 6 — STACK TO CHANGE WHAT A PIECE IS</div>
+  </header>
+
+  <div class="cols">
+    <div class="stage">
+      <div class="bar" id="bar"></div>
+      <div class="board" id="board"></div>
+      <div class="modebar" id="modebar"></div>
+      <div class="row">
+        <button id="newGame">新規対局</button>
+        <button id="undo">待った</button>
+        <button id="teach">チュートリアル</button>
+        <label>相手 <select id="opponent">
+          <option value="ai">AI</option>
+          <option value="human">人間 2人</option>
+          <option value="watch">AI 同士（観戦）</option>
+        </select></label>
+        <label>強さ <select id="level">
+          <option value="2">やさしい</option>
+          <option value="3" selected>ふつう</option>
+          <option value="4">つよい</option>
+        </select></label>
+        <label><input type="checkbox" id="swapRule" checked> スワップ</label>
+      </div>
+    </div>
+
+    <div>
+      <div class="panel">
+        <h2>記号</h2>
+        <div class="legend" id="legend"></div>
+      </div>
+      <div class="panel">
+        <h2>ルール</h2>
+        <div class="rules" id="rules"></div>
+      </div>
+      <div class="panel">
+        <h2>棋譜</h2>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="veil" id="veil"><div class="box">
+  <h3 id="veilTitle"></h3><p id="veilText"></p>
+  <div class="row" id="veilBtns"></div>
+</div></div>
+
+<script>
+// BODY N BRAIN — rules engine
+//
+// Square board of side `rules.size`. Two players: 0 = BLUE (先手), 1 = RED (後手).
+//
+// Cell codes:
+//   0 empty
+//   1 BODY  of P0     2 BODY  of P1
+//   3 BRAIN of P0     4 BRAIN of P1
+//   5 STACK of P0     6 STACK of P1   (a BODY carrying its own BRAIN)
+//
+// Every rule that affects balance — board size included — is exposed through a
+// `rules` object so the balance harness (src/sweep.mjs) can measure variants
+// instead of guessing.
+
+const EMPTY = 0;
+const bodyOf = (p) => 1 + p;
+const brainOf = (p) => 3 + p;
+const stackOf = (p) => 5 + p;
+
+const ownerOf = (c) => (c === 0 ? -1 : (c - 1) & 1);
+const isBody = (c) => c === 1 || c === 2;
+const isBrain = (c) => c === 3 || c === 4;
+const isStack = (c) => c === 5 || c === 6;
+
+const ORTHO = [
+  [1, 0],
+  [-1, 0],
+  [0, 1],
+  [0, -1],
+];
+const DIAG = [
+  [1, 1],
+  [1, -1],
+  [-1, 1],
+  [-1, -1],
+];
+const ALL8 = [...ORTHO, ...DIAG];
+
+const FILES = "abcdefgh";
+
+// Geometry helpers. The board is square, so a single `size` fixes everything.
+const xOf = (i, size) => i % size;
+const yOf = (i, size) => (i / size) | 0;
+const idx = (x, y, size) => y * size + x;
+const onBoard = (x, y, size) => x >= 0 && x < size && y >= 0 && y < size;
+const sqName = (i, size) => FILES[xOf(i, size)] + (yOf(i, size) + 1);
+
+function step(i, dx, dy, size) {
+  const x = xOf(i, size) + dx;
+  const y = yOf(i, size) + dy;
+  return onBoard(x, y, size) ? idx(x, y, size) : -1;
+}
+
+/** Distance to the nearest edge: 0 on the rim. */
+function rimOf(i, size) {
+  const x = xOf(i, size);
+  const y = yOf(i, size);
+  return Math.min(x, size - 1 - x, y, size - 1 - y);
+}
+
+// ---------------------------------------------------------------------------
+// Rules
+// ---------------------------------------------------------------------------
+
+// Tuned by self-play sweep — see docs/BALANCE.md for the measurements behind
+// every value here.
+const DEFAULT_RULES = {
+  size: 6, // board side; the back rank holds `size` pieces
+  stackRange: 2, // how far a whole stack may slide
+  stackCapturesStack: true, // a stack may capture another stack outright
+  tackle: true, // a BODY may charge a stack and knock the BRAIN off
+  invasion: "lone", // 'none' | 'lone' | 'any' — only a dismounted BRAIN scores
+  invasionSurvive: 1, // own turn-starts the BRAIN must survive on the goal rank
+  komi: 0.5, // judgement bonus for RED, compensating BLUE's first move
+  openingTax: "off", // 'off' / 'body' / 'nomount' / 'both' — see legalMoves
+  mountBan: 4, // plies during which NOBODY may combine, to open up the opening
+  maxPly: 120,
+};
+
+function makeRules(over = {}) {
+  const r = { ...DEFAULT_RULES, ...over };
+  r.cells = r.size * r.size;
+  return r;
+}
+
+/**
+ * Back-rank setup for P0; P1 mirrors it through a 180-degree rotation.
+ * Every player fields one BRAIN and `size - 1` BODY pieces.
+ */
+function backRank(size) {
+  const pat = new Array(size).fill("B");
+  pat[1] = "R";
+  return pat;
+}
+
+const goalRank = (p, size) => (p === 0 ? size - 1 : 0);
+
+// ---------------------------------------------------------------------------
+// State
+// ---------------------------------------------------------------------------
+
+function initialState(rules = makeRules()) {
+  const size = rules.size;
+  const n = size * size;
+  const cells = new Int8Array(n);
+  const pat = backRank(size);
+  for (let x = 0; x < size; x++) {
+    cells[x] = pat[x] === "B" ? bodyOf(0) : brainOf(0);
+    cells[n - 1 - x] = pat[x] === "B" ? bodyOf(1) : brainOf(1);
+  }
+  // held[p] = consecutive turn-starts p has had a scoring BRAIN on the goal rank
+  return { cells, turn: 0, ply: 0, passes: 0, held: [0, 0], winner: null, reason: null, rules };
+}
+
+function cloneState(s) {
+  return {
+    cells: Int8Array.from(s.cells),
+    turn: s.turn,
+    ply: s.ply,
+    passes: s.passes,
+    held: [s.held[0], s.held[1]],
+    winner: s.winner,
+    reason: s.reason,
+    rules: s.rules,
+  };
+}
+
+function hashState(s) {
+  let h = "";
+  for (let i = 0; i < s.cells.length; i++) h += s.cells[i];
+  return h + "|" + s.turn;
+}
+
+function hasBrainOnBoard(s, p) {
+  const b = brainOf(p);
+  const st = stackOf(p);
+  for (let i = 0; i < s.cells.length; i++) if (s.cells[i] === b || s.cells[i] === st) return true;
+  return false;
+}
+
+/** Is `p`'s BRAIN standing on the enemy home rank in a way that scores? */
+function brainOnGoal(s, p) {
+  const mode = s.rules.invasion;
+  if (mode === "none") return false;
+  const size = s.rules.size;
+  const y = goalRank(p, size);
+  const lone = brainOf(p);
+  const st = stackOf(p);
+  for (let x = 0; x < size; x++) {
+    const c = s.cells[idx(x, y, size)];
+    if (c === lone) return true;
+    if (mode === "any" && c === st) return true;
+  }
+  return false;
+}
+
+/**
+ * Positional judgement used when the game stops making progress (3-fold
+ * repetition or the ply limit). Shuffling is therefore never a safe way to
+ * hold a draw: the player who has pushed their BRAIN deeper — and failing
+ * that, the player with more BODY pieces — takes the point.
+ */
+function judge(s) {
+  const size = s.rules.size;
+  const depth = [0, 0];
+  const bodies = [0, 0];
+  for (let i = 0; i < s.cells.length; i++) {
+    const c = s.cells[i];
+    if (c === 0) continue;
+    const o = ownerOf(c);
+    if (isBody(c) || isStack(c)) bodies[o] += 1;
+    if (isBrain(c) || isStack(c))
+      depth[o] = size - 1 - Math.abs(yOf(i, size) - goalRank(o, size));
+  }
+  const komi = s.rules.komi || 0;
+  let winner = -1;
+  if (depth[0] !== depth[1] + komi) winner = depth[0] > depth[1] + komi ? 0 : 1;
+  else if (bodies[0] !== bodies[1]) winner = bodies[0] > bodies[1] ? 0 : 1;
+  return { winner, depth, bodies, komi };
+}
+
+// ---------------------------------------------------------------------------
+// Move generation
+//
+//   'body'    a lone BODY — or the BODY stepping out from under its BRAIN —
+//             walks one orthogonal step; captures a lone enemy piece by
+//             displacement; sliding onto a friendly lone BRAIN mounts it.
+//   'tackle'  a BODY charges an adjacent enemy STACK. The stack is not
+//             captured, but its BRAIN is knocked one square further along the
+//             charge line. If that square is off the board or occupied, the
+//             BRAIN is destroyed. The charging piece never moves.
+//   'brain'   a lone BRAIN — or the BRAIN dismounting — slides one diagonal
+//             step. It can never capture. Landing on a friendly lone BODY
+//             mounts it.
+//   'stack'   a whole stack slides up to `stackRange` squares in any of the 8
+//             directions without jumping, capturing a lone enemy piece.
+// ---------------------------------------------------------------------------
+
+function legalMoves(s, player = s.turn) {
+  const c = s.cells;
+  const r = s.rules;
+  const size = r.size;
+  const moves = [];
+  const me = player;
+  const opp = 1 - player;
+
+  for (let i = 0; i < c.length; i++) {
+    const cell = c[i];
+    if (cell === 0 || ownerOf(cell) !== me) continue;
+    const stack = isStack(cell);
+
+    if (isBody(cell) || stack) {
+      for (const [dx, dy] of ORTHO) {
+        const t = step(i, dx, dy, size);
+        if (t < 0) continue;
+        const tc = c[t];
+        if (tc === 0) {
+          moves.push({ kind: "body", from: i, to: t, split: stack });
+        } else if (ownerOf(tc) === opp) {
+          if (isStack(tc)) {
+            if (!r.tackle) continue;
+            const push = step(t, dx, dy, size);
+            const blocked = push < 0 || c[push] !== 0;
+            moves.push({ kind: "tackle", from: i, target: t, push: blocked ? -1 : push });
+          } else {
+            moves.push({ kind: "body", from: i, to: t, capture: tc, split: stack });
+          }
+        } else if (!stack && isBrain(tc)) {
+          moves.push({ kind: "body", from: i, to: t, mount: true });
+        }
+      }
+    }
+
+    if (isBrain(cell) || stack) {
+      for (const [dx, dy] of DIAG) {
+        const t = step(i, dx, dy, size);
+        if (t < 0) continue;
+        const tc = c[t];
+        if (tc === 0) moves.push({ kind: "brain", from: i, to: t, split: stack });
+        else if (ownerOf(tc) === me && isBody(tc))
+          moves.push({ kind: "brain", from: i, to: t, mount: true, split: stack });
+      }
+    }
+
+    if (stack) {
+      for (const [dx, dy] of ALL8) {
+        let t = i;
+        for (let n = 1; n <= r.stackRange; n++) {
+          t = step(t, dx, dy, size);
+          if (t < 0) break;
+          const tc = c[t];
+          if (tc === 0) {
+            moves.push({ kind: "stack", from: i, to: t, dist: n });
+            continue;
+          }
+          if (ownerOf(tc) === opp && (!isStack(tc) || r.stackCapturesStack)) {
+            moves.push({ kind: "stack", from: i, to: t, dist: n, capture: tc });
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Combining is so strong that, unrestricted, it is the only sensible opening
+  // and every game starts the same way. Holding it back for a few plies turns
+  // the opening into a question of development, where many moves are near-equal.
+  if (r.mountBan && s.ply < r.mountBan) {
+    const free = moves.filter((m) => !m.mount);
+    if (free.length) return free;
+  }
+
+  // Opening tax — the first player pays something for the initiative.
+  //   'off'    no restriction
+  //   'body'   BLACK's first move must be a plain BODY step (harshest)
+  //   'nomount' BLACK's first move may be anything except combining
+  //   'both'   NEITHER player may combine on their first move (symmetric)
+  const tax = r.openingTax;
+  if (tax && tax !== "off" && s.ply <= (tax === "both" ? 1 : 0)) {
+    const mine = tax === "both" || me === 0;
+    if (mine) {
+      const taxed =
+        tax === "body" ? moves.filter((m) => m.kind === "body" && !m.mount) : moves.filter((m) => !m.mount);
+      if (taxed.length) return taxed;
+    }
+  }
+  return moves;
+}
+
+// ---------------------------------------------------------------------------
+// Applying moves
+// ---------------------------------------------------------------------------
+
+function applyMove(s, m) {
+  const n = cloneState(s);
+  const c = n.cells;
+  const me = s.turn;
+  const opp = 1 - me;
+
+  switch (m.kind) {
+    case "body":
+      c[m.from] = m.split ? brainOf(me) : EMPTY;
+      c[m.to] = m.mount ? stackOf(me) : bodyOf(me);
+      break;
+    case "brain":
+      c[m.from] = m.split ? bodyOf(me) : EMPTY;
+      c[m.to] = m.mount ? stackOf(me) : brainOf(me);
+      break;
+    case "stack":
+      c[m.from] = EMPTY;
+      c[m.to] = stackOf(me);
+      break;
+    case "tackle":
+      // the charging piece never leaves its square
+      c[m.target] = bodyOf(opp);
+      if (m.push >= 0) c[m.push] = brainOf(opp);
+      break;
+    case "pass":
+      break;
+    default:
+      throw new Error("unknown move kind: " + m.kind);
+  }
+
+  n.ply = s.ply + 1;
+  n.passes = m.kind === "pass" ? s.passes + 1 : 0;
+  n.turn = opp;
+
+  // The invasion clock ticks at the start of each player's own turn: a BRAIN
+  // that is still standing on the enemy home rank when its owner is about to
+  // move has survived one full enemy reply.
+  n.held[opp] = brainOnGoal(n, opp) ? n.held[opp] + 1 : 0;
+
+  if (!hasBrainOnBoard(n, opp)) {
+    n.winner = me;
+    n.reason = "brain";
+  } else if (n.held[opp] >= n.rules.invasionSurvive) {
+    n.winner = opp;
+    n.reason = "invasion";
+  } else if (n.passes >= 2 || n.ply >= n.rules.maxPly) {
+    n.winner = judge(n).winner;
+    n.reason = "judgement";
+  }
+  return n;
+}
+
+function movesOrPass(s) {
+  const ms = legalMoves(s);
+  return ms.length ? ms : [{ kind: "pass" }];
+}
+
+const isOver = (s) => s.winner !== null;
+
+function moveText(m, size) {
+  const sq = (i) => sqName(i, size);
+  switch (m.kind) {
+    case "body":
+      return `BODY ${sq(m.from)}→${sq(m.to)}${m.mount ? " 合体" : ""}${m.capture ? " ×" : ""}${
+        m.split ? " 分離" : ""
+      }`;
+    case "brain":
+      return `BRAIN ${sq(m.from)}→${sq(m.to)}${m.mount ? " 合体" : ""}${m.split ? " 分離" : ""}`;
+    case "stack":
+      return `MECH ${sq(m.from)}→${sq(m.to)}${m.capture ? " ×" : ""}`;
+    case "tackle":
+      return `TACKLE ${sq(m.from)}→${sq(m.target)}${
+        m.push < 0 ? " 撃墜!!" : ` (BRAIN→${sq(m.push)})`
+      }`;
+    case "pass":
+      return "パス";
+  }
+  return "?";
+}
+// BODY N BRAIN — evaluation + alpha-beta search
+
+const WIN = 100000;
+
+const V_BODY = 100;
+const V_STACK_BONUS = 55; // being mounted is worth roughly half a BODY
+const V_CENTRE = 8;
+const V_MOBILITY = 3;
+const V_LONE_BRAIN = -30; // an unmounted BRAIN is a liability
+const V_WALL_BRAIN = -22; // a mounted BRAIN on the rim can be tackled off the board
+const V_ADVANCE = 14; // per rank the BRAIN has pushed toward the enemy home rank
+const V_ON_GOAL = 220; // sitting on the goal rank: one survived turn from winning
+
+/** Static evaluation from the point of view of `me`. */
+function evaluate(s, me) {
+  if (s.winner !== null) {
+    if (s.winner === -1) return 0;
+    return s.winner === me ? WIN : -WIN;
+  }
+  const c = s.cells;
+  const size = s.rules.size;
+  const far = size - 1;
+  let score = 0;
+  for (let i = 0; i < c.length; i++) {
+    const cell = c[i];
+    if (cell === 0) continue;
+    const o = ownerOf(cell);
+    const sign = o === me ? 1 : -1;
+    let v = 0;
+    if (isBody(cell)) v += V_BODY;
+    else if (isBrain(cell)) v += V_LONE_BRAIN;
+    else if (isStack(cell)) {
+      v += V_BODY + V_STACK_BONUS;
+      if (rimOf(i, size) === 0) v += V_WALL_BRAIN;
+    }
+    if (s.rules.invasion !== "none" && (isBrain(cell) || isStack(cell))) {
+      const scores = s.rules.invasion === "any" || isBrain(cell);
+      const progress = far - Math.abs(yOf(i, size) - goalRank(o, size));
+      v += V_ADVANCE * progress;
+      // worth more the closer the invasion clock is to running out
+      if (progress === far && scores)
+        v += (V_ON_GOAL * (s.held[o] + 1)) / s.rules.invasionSurvive;
+    }
+    v += V_CENTRE * rimOf(i, size);
+    score += sign * v;
+  }
+  // mobility of the side to move (cheap proxy for initiative)
+  const mob = legalMoves(s, s.turn).length;
+  score += (s.turn === me ? 1 : -1) * V_MOBILITY * mob;
+  return score;
+}
+
+function scoreMove(m) {
+  // cheap move ordering: wins first, then captures, then tackles
+  if (m.kind === "tackle") return m.push < 0 ? 9000 : 400;
+  if (m.capture) return isBrain(m.capture) ? 9000 : 500;
+  if (m.mount) return 200;
+  return 0;
+}
+
+function search(s, depth, me, alpha = -Infinity, beta = Infinity) {
+  if (isOver(s) || depth === 0) return { score: evaluate(s, me), move: null };
+
+  const moves = movesOrPass(s);
+  moves.sort((a, b) => scoreMove(b) - scoreMove(a));
+
+  const maximizing = s.turn === me;
+  let best = null;
+  let bestScore = maximizing ? -Infinity : Infinity;
+
+  for (const m of moves) {
+    const ns = applyMove(s, m);
+    const r = search(ns, depth - 1, me, alpha, beta);
+    // prefer faster wins / slower losses
+    const sc = r.score > WIN / 2 ? r.score - 1 : r.score < -WIN / 2 ? r.score + 1 : r.score;
+    if (maximizing) {
+      if (sc > bestScore) (bestScore = sc), (best = m);
+      alpha = Math.max(alpha, bestScore);
+    } else {
+      if (sc < bestScore) (bestScore = sc), (best = m);
+      beta = Math.min(beta, bestScore);
+    }
+    if (beta <= alpha) break;
+  }
+  return { score: bestScore, move: best };
+}
+
+/**
+ * Pick a move for the side to move.
+ * `temperature` (0..1) mixes in near-optimal alternatives so that repeated
+ * self-play games do not all follow the same line.
+ */
+function chooseMove(s, depth, rng = Math.random, temperature = 0) {
+  const me = s.turn;
+  const moves = movesOrPass(s);
+  if (moves.length === 1) return moves[0];
+  const scored = moves.map((m) => {
+    const ns = applyMove(s, m);
+    return { m, score: search(ns, depth - 1, me).score };
+  });
+  scored.sort((a, b) => b.score - a.score);
+  if (temperature <= 0) {
+    const top = scored.filter((x) => x.score === scored[0].score);
+    return top[(rng() * top.length) | 0].m;
+  }
+  const slack = temperature * 60;
+  const pool = scored.filter((x) => x.score >= scored[0].score - slack);
+  return pool[(rng() * pool.length) | 0].m;
+}
+
+/** Squares from which an enemy BODY could tackle the stack at `i` fatally. */
+function fatalTackleSquares(s, i) {
+  const size = s.rules.size;
+  const out = [];
+  for (const [dx, dy] of ORTHO) {
+    const fx = xOf(i, size) - dx;
+    const fy = yOf(i, size) - dy;
+    if (!onBoard(fx, fy, size)) continue;
+    const px = xOf(i, size) + dx;
+    const py = yOf(i, size) + dy;
+    const blocked = !onBoard(px, py, size) || s.cells[idx(px, py, size)] !== 0;
+    if (blocked) out.push(idx(fx, fy, size));
+  }
+  return out;
+}
+// BODY N BRAIN — browser UI. Inlined into index.html by build.mjs.
+// Player 0 is BLACK (solid pieces, moves first), player 1 is WHITE (outlined).
+
+const $ = (id) => document.getElementById(id);
+const boardEl = $("board");
+const logEl = $("log");
+const modebarEl = $("modebar");
+const barEl = $("bar");
+
+const RULES = makeRules();
+const SIZE = RULES.size;
+const SQ = (i) => sqName(i, SIZE);
+const AT = (x, y) => idx(x, y, SIZE);
+const SIDE = ["黒", "白"];
+
+let state, history, sel, mode, lastMove, repeats, busy;
+let aiSide, swapPending, swapUsed;
+let teach = null; // tutorial progress, or null during a real game
+let paused = false; // watch mode only
+
+/** Only swap on a real advantage — never on evaluation noise. */
+const SWAP_MARGIN = 20;
+
+/** 'ai' = you vs AI, 'human' = two people, 'watch' = AI vs AI. */
+const opponent = () => (teach ? "human" : $("opponent").value);
+const watching = () => opponent() === "watch";
+const vsAI = () => opponent() === "ai";
+const aiToMove = () => watching() || (vsAI() && state.turn === aiSide);
+const humanSide = () => (vsAI() ? 1 - aiSide : 0);
+const flipped = () => humanSide() === 1;
+
+// ---------------------------------------------------------------------------
+// Tutorial — the player is taught by making each move themselves.
+// Every step hand-places a position and only accepts the move it is teaching.
+// ---------------------------------------------------------------------------
+
+const TUTORIAL = [
+  {
+    title: "BODY は縦横に1マス",
+    text: "<b>BODY（■）</b>は縦横に1マスだけ動きます。鈍いけれど、単体の敵駒を取れるのはこの駒です。動かしてみましょう。",
+    cells: () => ({ [AT(2, 1)]: bodyOf(0), [AT(4, 3)]: bodyOf(1) }),
+    accept: (m) => m.kind === "body",
+  },
+  {
+    title: "BRAIN は斜めに1マス、駒を取れない",
+    text: "<b>BRAIN（●）</b>は斜めに1マス。そして<b>絶対に駒を取れません</b>。右上の白い駒には入れないことを確かめてください。",
+    cells: () => ({ [AT(2, 1)]: brainOf(0), [AT(3, 2)]: bodyOf(1) }),
+    accept: (m) => m.kind === "brain",
+  },
+  {
+    title: "重ねると、別の駒になる",
+    text: "BRAIN を味方 BODY のマスへ動かすと<b>合体</b>。これがこのゲームの核心です。d3 の BODY に乗せてください。",
+    cells: () => ({ [AT(2, 1)]: brainOf(0), [AT(3, 2)]: bodyOf(0) }),
+    accept: (m) => m.mount === true,
+  },
+  {
+    title: "合体駒は8方向に2マス",
+    text: "合体駒は<b>8方向に最大2マス</b>滑ります。BODY にも BRAIN にも無い、まったく別の動きです。2マス動かしてみましょう。",
+    cells: () => ({ [AT(2, 2)]: stackOf(0), [AT(4, 4)]: bodyOf(1) }),
+    accept: (m) => m.kind === "stack" && m.dist === 2,
+  },
+  {
+    title: "合体駒はタックルで崩す",
+    text: "合体駒は単体の駒では<b>取れません</b>。代わりに BODY で体当たり（<b>タックル</b>）すると、上の BRAIN だけが1マス弾き飛ばされます。突撃した駒は動きません。",
+    cells: () => ({ [AT(1, 2)]: bodyOf(0), [AT(2, 2)]: stackOf(1), [AT(0, 0)]: brainOf(0) }),
+    accept: (m) => m.kind === "tackle",
+    pause: 1100,
+  },
+  {
+    title: "壁際の合体駒は即死する",
+    text: "弾き飛ばす先が<b>盤外</b>か他の駒なら、BRAIN は撃墜されて<b>その場で勝ち</b>。合体駒は最強ですが、縁に出ると一撃で終わります。",
+    cells: () => ({
+      [AT(SIZE - 2, 2)]: bodyOf(0),
+      [AT(SIZE - 1, 2)]: stackOf(1),
+      [AT(0, 0)]: brainOf(0),
+    }),
+    accept: (m) => m.kind === "tackle" && m.push < 0,
+    pause: 1100,
+  },
+  {
+    title: "もう一つの勝ち方：侵攻",
+    text: `敵陣の最奥（${SIZE}段目）に <b>BRAIN を降ろして</b>立たせ、相手の1手を生き延びても勝ちです。合体駒のまま乗り込んでも無効 — 必ず<b>分離</b>が要ります。BRAIN を最奥段へ降ろしてください。`,
+    cells: () => ({ [AT(2, SIZE - 2)]: stackOf(0), [AT(0, 0)]: brainOf(1) }),
+    accept: (m) => m.kind === "brain" && m.split && yOf(m.to, SIZE) === goalRank(0, SIZE),
+    pause: 900,
+  },
+];
+
+function startTutorial() {
+  teach = { i: 0 };
+  aiSide = 1;
+  swapUsed = true;
+  swapPending = false;
+  loadTutorialStep();
+}
+
+function loadTutorialStep() {
+  const step = TUTORIAL[teach.i];
+  teach.done = false; // the new step has not been solved yet
+  state = initialState(RULES);
+  state.cells.fill(EMPTY);
+  for (const [i, v] of Object.entries(step.cells())) state.cells[i] = v;
+  state.ply = 4; // past the opening tax
+  state.turn = 0;
+  history = [];
+  repeats = new Map();
+  sel = null;
+  lastMove = null;
+  busy = false;
+  // auto-select when only one piece can make the move being taught
+  const froms = new Set(allowedMoves().map((m) => m.from));
+  if (froms.size === 1) sel = [...froms][0];
+  mode = defaultMode(sel);
+  render();
+}
+
+function tutorialAdvance() {
+  teach.i += 1;
+  if (teach.i >= TUTORIAL.length) {
+    teach = null;
+    showVeil("チュートリアル終了", "7つのルールはこれで全部です。実戦へどうぞ。", [
+      ["対局を始める", () => (closeVeil(), newGame()), true],
+    ]);
+    return;
+  }
+  loadTutorialStep();
+}
+
+// ---------------------------------------------------------------------------
+// Game
+// ---------------------------------------------------------------------------
+
+function newGame() {
+  teach = null;
+  state = initialState(RULES);
+  history = [];
+  repeats = new Map();
+  sel = null;
+  mode = "stack";
+  lastMove = null;
+  busy = false;
+  aiSide = 1;
+  swapPending = false;
+  swapUsed = false;
+  paused = false;
+  logEl.innerHTML = "";
+  closeVeil();
+  render();
+  if (aiToMove()) aiTurn();
+}
+
+/** Legal moves, narrowed to what the current tutorial step is teaching. */
+function allowedMoves() {
+  const ms = legalMoves(state);
+  return teach ? ms.filter(TUTORIAL[teach.i].accept) : ms;
+}
+
+const movesFrom = (i) => allowedMoves().filter((m) => m.from === i);
+
+function defaultMode(i) {
+  if (i === null || i === undefined) return "stack";
+  const kinds = new Set(movesFrom(i).map((x) => x.kind));
+  return kinds.has("stack") ? "stack" : kinds.has("brain") ? "brain" : "body";
+}
+
+const MODES = [
+  { key: "stack", label: "合体駒で動く", has: (m) => m.kind === "stack" || m.kind === "tackle" },
+  { key: "brain", label: "BRAIN だけ降りる", has: (m) => m.kind === "brain" },
+  { key: "body", label: "BODY だけ出る", has: (m) => m.kind === "body" || m.kind === "tackle" },
+];
+
+function offered() {
+  if (sel === null) return [];
+  const all = movesFrom(sel);
+  if (!isStack(state.cells[sel])) return all;
+  return all.filter(MODES.find((m) => m.key === mode).has);
+}
+
+const targetOf = (m) => (m.kind === "tackle" ? m.target : m.to);
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+
+function pieceHTML(c) {
+  const p = ownerOf(c);
+  if (isBody(c)) return `<div class="piece p${p}"><div class="pbody"></div></div>`;
+  if (isBrain(c)) return `<div class="piece p${p} lone"><div class="pbrain"></div></div>`;
+  return `<div class="piece p${p} stacked"><div class="pbody"></div><div class="pbrain"></div></div>`;
+}
+
+const markClass = (m) =>
+  m.kind === "tackle" ? "mk-tackle" : m.capture ? "mk-take" : m.mount ? "mk-mount" : "mk-move";
+
+function render() {
+  const marks = new Map();
+  for (const m of offered()) marks.set(targetOf(m), m);
+  const teachTargets = teach ? new Set(allowedMoves().map(targetOf)) : null;
+
+  boardEl.style.gridTemplateColumns = `repeat(${SIZE},1fr)`;
+  boardEl.innerHTML = "";
+  const flip = flipped();
+  for (let row = 0; row < SIZE; row++) {
+    for (let col = 0; col < SIZE; col++) {
+      // 180-degree rotation when the human plays WHITE, so their own back rank
+      // is always the near one
+      const y = flip ? row : SIZE - 1 - row;
+      const x = flip ? SIZE - 1 - col : col;
+      const i = AT(x, y);
+
+      const cell = document.createElement("div");
+      let cls = "cell" + ((x + y) % 2 ? " alt" : "");
+      if (y === 0 || y === SIZE - 1) cls += " goal";
+      if (i === sel) cls += " sel";
+      if (lastMove && (lastMove.from === i || targetOf(lastMove) === i)) cls += " last";
+      if (teachTargets && teachTargets.has(i) && marks.size === 0) cls += " teachtarget";
+      cell.className = cls;
+
+      let html = `<span class="coord">${SQ(i)}</span>`;
+      const c = state.cells[i];
+      if (c !== 0) html += pieceHTML(c);
+      const m = marks.get(i);
+      if (m) html += `<span class="mk ${markClass(m)}"><i></i></span>`;
+      cell.innerHTML = html;
+      cell.onclick = () => onCell(i);
+      boardEl.appendChild(cell);
+    }
+  }
+
+  renderBar();
+  renderModebar();
+  $("undo").disabled = !history.length || busy || swapPending || !!teach || watching();
+}
+
+function renderBar() {
+  if (teach) {
+    const step = TUTORIAL[teach.i];
+    barEl.className = "bar teach";
+    barEl.innerHTML =
+      `<span class="step">${teach.i + 1}/${TUTORIAL.length}</span>` +
+      `<p><b>${step.title}</b><br>${step.text}</p>`;
+    return;
+  }
+  barEl.className = "bar";
+  if (swapPending) {
+    barEl.innerHTML =
+      `<span class="step">SWAP</span>` +
+      `<p>先手の初手を見て、<b>盤ごと陣営を入れ替えられます</b>。</p>`;
+    return;
+  }
+  const p = state.turn;
+  const who = watching()
+    ? `AI ${p === 0 ? "①" : "②"}`
+    : vsAI()
+    ? p === aiSide
+      ? "AI"
+      : "あなた"
+    : p === 0
+    ? "先手"
+    : "後手";
+  const tail = paused ? "（一時停止中）" : busy ? "（思考中…）" : "";
+  barEl.innerHTML =
+    `<span class="turnmark${p === 0 ? " solid" : ""}"></span>` +
+    `<p><b>${SIDE[p]}の手番</b> — ${who}${tail}</p>`;
+}
+
+function renderModebar() {
+  modebarEl.innerHTML = "";
+  const add = (label, fn, cls) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = fn;
+    modebarEl.appendChild(b);
+    return b;
+  };
+
+  if (teach) {
+    if (teach.done) add("次へ →", tutorialAdvance, "primary");
+    else {
+      const s = document.createElement("span");
+      s.className = "hint";
+      s.textContent = "印のついたマスをクリック";
+      modebarEl.appendChild(s);
+    }
+    add("やめる", () => {
+      teach = null;
+      newGame();
+    });
+    return;
+  }
+
+  if (swapPending) {
+    add("入れ替える", () => resolveSwap(true), "primary");
+    add("このまま", () => resolveSwap(false));
+    return;
+  }
+
+  if (watching()) {
+    if (isOver(state)) {
+      add("もう一局", newGame, "primary");
+    } else {
+      add(paused ? "再開" : "一時停止", () => {
+        paused = !paused;
+        render();
+        if (!paused && aiToMove()) aiTurn();
+      });
+      add("1手進める", () => {
+        paused = true;
+        aiTurn();
+      }).disabled = busy;
+    }
+    const s = document.createElement("span");
+    s.className = "hint";
+    s.textContent = "AI 同士の対戦を観戦中";
+    modebarEl.appendChild(s);
+    return;
+  }
+
+  if (sel !== null && isStack(state.cells[sel])) {
+    for (const md of MODES) {
+      const b = add(md.label, () => {
+        mode = md.key;
+        render();
+      });
+      if (md.key === mode) b.className = "on";
+      b.disabled = !movesFrom(sel).some(md.has);
+    }
+    return;
+  }
+
+  const s = document.createElement("span");
+  s.className = "hint";
+  s.textContent =
+    state.ply < RULES.mountBan
+      ? `序盤 ${RULES.mountBan} 手は合体できません — まず駒組み（あと${
+          RULES.mountBan - state.ply
+        }手）`
+      : sel === null
+      ? "駒をクリック → 行き先をクリック"
+      : "行き先をクリック";
+  modebarEl.appendChild(s);
+}
+
+function logMove(player, m) {
+  const d = document.createElement("div");
+  if (player === 0) d.className = "b";
+  d.textContent = `${String(Math.floor(state.ply / 2) + 1).padStart(2, " ")}. ${
+    SIDE[player]
+  } ${moveText(m, SIZE)}`;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+// ---------------------------------------------------------------------------
+// Interaction
+// ---------------------------------------------------------------------------
+
+function onCell(i) {
+  if (busy || swapPending || watching() || isOver(state) || (teach && teach.done)) return;
+  const m = offered().find((mv) => targetOf(mv) === i);
+  if (m) return void play(m);
+
+  const c = state.cells[i];
+  if (c !== 0 && ownerOf(c) === state.turn && movesFrom(i).length) {
+    sel = i;
+    mode = defaultMode(i);
+  } else {
+    sel = null;
+  }
+  render();
+}
+
+function play(m) {
+  const player = state.turn;
+  history.push(state);
+  if (!teach) logMove(player, m);
+  state = applyMove(state, m);
+  lastMove = m;
+  sel = null;
+
+  if (teach) {
+    teach.done = true;
+    render();
+    const wait = TUTORIAL[teach.i].pause || 550;
+    busy = true;
+    setTimeout(() => {
+      busy = false;
+      render();
+    }, wait);
+    return;
+  }
+
+  const h = hashState(state);
+  const n = (repeats.get(h) || 0) + 1;
+  repeats.set(h, n);
+  if (n >= 3 && !isOver(state)) {
+    state = { ...state, winner: judge(state).winner, reason: "repetition" };
+  }
+
+  render();
+  if (isOver(state)) return void finish();
+
+  // Swap (pie) rule: having seen BLACK's opening, the second player may take
+  // the BLACK side instead. This is what neutralises the first-move advantage.
+  if ($("swapRule").checked && !swapUsed && state.ply === 1) {
+    if (watching() || (vsAI() && state.turn === aiSide)) return void aiSwapDecision();
+    swapPending = true;
+    return void render();
+  }
+
+  if (!legalMoves(state).length) return void setTimeout(() => play({ kind: "pass" }), 350);
+  if (aiToMove() && !paused) aiTurn();
+}
+
+function aiSwapDecision() {
+  busy = true;
+  render();
+  setTimeout(() => {
+    const depth = Math.max(2, Number($("level").value) - 1);
+    const take = search(state, depth, 1 - state.turn).score > SWAP_MARGIN;
+    busy = false;
+    resolveSwap(take);
+  }, 260);
+}
+
+function resolveSwap(doSwap) {
+  swapPending = false;
+  swapUsed = true;
+  if (doSwap) {
+    aiSide = 1 - aiSide;
+    const d = document.createElement("div");
+    d.className = "meta";
+    d.textContent = "— スワップ発動：陣営が入れ替わりました —";
+    logEl.appendChild(d);
+  }
+  render();
+
+  if (doSwap && vsAI() && !watching()) {
+    showVeil(
+      "スワップ発動",
+      `AI があなたの初手を見て陣営を入れ替えました。あなたは <b>${
+        SIDE[humanSide()]
+      }</b> です。盤はあなたの陣が手前に来るよう反転しています。`,
+      [["対局を続ける", () => (closeVeil(), aiToMove() && aiTurn()), true]]
+    );
+    return;
+  }
+  if (aiToMove()) aiTurn();
+}
+
+/** Plies during which the AI deliberately varies its choice. */
+const OPENING_PLIES = 8;
+const OPENING_TEMP = 0.35;
+
+function aiTurn() {
+  busy = true;
+  render();
+  setTimeout(() => {
+    const depth = Number($("level").value);
+    const base = depth <= 2 ? 0.5 : 0.06;
+    // At near-zero temperature the AI replays the same opening every game, so
+    // every game starts identically. Spread the first few moves across the
+    // options it considers near-equal.
+    const temp = state.ply < OPENING_PLIES ? Math.max(base, OPENING_TEMP) : base;
+    const m = chooseMove(state, depth, Math.random, temp);
+    busy = false;
+    play(m);
+  }, watching() ? 550 : 200); // slower when nobody is choosing, so it can be followed
+}
+
+const REASONS = {
+  brain: "相手の BRAIN を捕獲しました。",
+  invasion: "BRAIN が敵陣に降り立ち、生き延びました。",
+  repetition: "千日手 — 判定で決着しました。",
+  judgement: "手数切れ — 判定で決着しました。",
+};
+
+function finish() {
+  const w = state.winner;
+  const j = judge(state);
+  const tail =
+    w === -1 ? "" : watching() ? `（AI ${w === 0 ? "①" : "②"}）` : vsAI() ? `（${w === humanSide() ? "あなた" : "AI"}）` : "";
+  const detail =
+    state.reason === "repetition" || state.reason === "judgement"
+      ? `　侵攻度 ${j.depth[0]} 対 ${j.depth[1]}＋コミ${j.komi}、BODY ${j.bodies[0]} 対 ${j.bodies[1]}`
+      : "";
+  showVeil(
+    w === -1 ? "引き分け" : `${SIDE[w]}の勝ち${tail}`,
+    (REASONS[state.reason] || "") + detail,
+    [
+      ["もう一局", () => (closeVeil(), newGame()), true],
+      ["待った", () => (closeVeil(), undo())],
+    ]
+  );
+}
+
+function popOne() {
+  state = history.pop();
+  while (logEl.lastChild && logEl.lastChild.className === "meta") logEl.removeChild(logEl.lastChild);
+  if (logEl.lastChild) logEl.removeChild(logEl.lastChild);
+}
+
+function undo() {
+  if (!history.length || busy || swapPending || teach) return;
+  popOne();
+  if (state.ply <= 1 && swapUsed) {
+    if (humanSide() === 1) aiSide = 1 - aiSide;
+    swapUsed = false;
+  }
+  while (history.length && aiToMove()) popOne();
+  sel = null;
+  lastMove = null;
+  closeVeil();
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// Overlay
+// ---------------------------------------------------------------------------
+
+function showVeil(title, html, buttons) {
+  $("veilTitle").textContent = title;
+  $("veilText").innerHTML = html;
+  const box = $("veilBtns");
+  box.innerHTML = "";
+  for (const [label, fn, primary] of buttons) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (primary) b.className = "primary";
+    b.onclick = fn;
+    box.appendChild(b);
+  }
+  $("veil").classList.add("show");
+}
+const closeVeil = () => $("veil").classList.remove("show");
+
+// ---------------------------------------------------------------------------
+// Static panels
+// ---------------------------------------------------------------------------
+
+$("tagline").textContent = `${SIZE} × ${SIZE} — STACK TO CHANGE WHAT A PIECE IS`;
+
+$("legend").innerHTML = [
+  [`<span class="mk mk-move"><i></i></span>`, "移動できる"],
+  [`<span class="mk mk-take"><i></i></span>`, "取れる"],
+  [`<span class="mk mk-mount"><i></i></span>`, "合体できる"],
+  [`<span class="mk mk-tackle"><i></i></span>`, "タックルできる"],
+  [`<span class="piece p0"><span class="pbody"></span></span>`, "黒 = 先手（塗り）"],
+  [`<span class="piece p1"><span class="pbody"></span></span>`, "白 = 後手（枠）"],
+  [`<span class="piece p0 stacked"><span class="pbody"></span><span class="pbrain"></span></span>`, "合体駒"],
+]
+  .map(([sw, t]) => `<span class="sw">${sw}</span><span>${t}</span>`)
+  .join("");
+
+$("rules").innerHTML = `<dl>
+<dt>BODY ■ — 縦横に1マス</dt><dd>単体の敵駒を取れる。合体駒にはタックルできる。</dd>
+<dt>BRAIN ● — 斜めに1マス</dt><dd>駒を取れない。取られたら負け。</dd>
+<dt>合体駒 — 8方向に最大2マス</dt><dd>飛び越え不可。単体の駒では取れず、合体駒だけが取れる。</dd>
+<dt>タックル</dt><dd>BODY が隣の敵合体駒へ突撃すると、上の BRAIN が1マス弾かれる。
+  行き先が盤外・他の駒なら撃墜＝勝ち。突撃側は動かない。</dd>
+<dt>勝ち方は2つ</dt><dd>相手の BRAIN を取る。または単体の BRAIN を敵陣最奥に立たせ、相手の1手を生き延びる。</dd>
+<dt>判定</dt><dd>千日手・${RULES.maxPly}手で判定。BRAIN がより深い側の勝ち、同じなら BODY の多い側。後手にコミ ${RULES.komi}。</dd>
+<dt>序盤の合体禁止</dt><dd>最初の ${RULES.mountBan} 手（各2手）は<b>両者とも合体できません</b>。
+  合体が強すぎて、無ければ初手が1通りに固定されてしまうため。おかげで初手はどれを選んでも互角です。</dd>
+<dt>先後の調整</dt><dd>後手は先手の初手を見てから陣営を入れ替えられる（スワップ）。</dd>
+</dl>`;
+
+$("newGame").onclick = newGame;
+$("undo").onclick = undo;
+$("teach").onclick = startTutorial;
+$("opponent").onchange = newGame;
+$("swapRule").onchange = newGame;
+$("veil").onclick = (e) => {
+  if (e.target === $("veil")) closeVeil();
+};
+
+// The tutorial no longer opens by itself — it is on the チュートリアル button.
+newGame();
+</script>
+</body>
+</html>
