@@ -30,7 +30,7 @@ export function mulberry32(a) {
 }
 
 export function playGame({
-  rules = DEFAULT_RULES,
+  rules = makeRules(),
   depth = 3,
   depths, // optional [blueDepth, redDepth] for skill-gap matches
   rng,
@@ -44,7 +44,8 @@ export function playGame({
     const moves = movesOrPass(s);
     const d = depths ? depths[s.turn] : depth;
     const m = moves.length === 1 ? moves[0] : chooseMove(s, d, rng, temperature);
-    if (trace) log.push(`${s.ply + 1}. ${s.turn === 0 ? "BLUE" : "RED "} ${moveText(m)}`);
+    if (trace)
+      log.push(`${s.ply + 1}. ${s.turn === 0 ? "BLUE" : "RED "} ${moveText(m, rules.size)}`);
     s = applyMove(s, m);
     const h = hashState(s);
     const c = (seen.get(h) || 0) + 1;
@@ -58,7 +59,7 @@ export function playGame({
 }
 
 export function measure({
-  rules,
+  rules = makeRules(),
   games = 120,
   depth = 3,
   depths,

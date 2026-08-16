@@ -1,6 +1,6 @@
 // BODY N BRAIN — rules engine
 //
-// 4x4 board (16 squares). Two players: 0 = BLUE (先手), 1 = RED (後手).
+// Square board of side `rules.size`. Two players: 0 = BLUE (先手), 1 = RED (後手).
 //
 // Cell codes:
 //   0 empty
@@ -8,12 +8,9 @@
 //   3 BRAIN of P0     4 BRAIN of P1
 //   5 STACK of P0     6 STACK of P1   (a BODY carrying its own BRAIN)
 //
-// Every rule that affects balance is exposed through a `rules` object so the
-// balance harness (src/sweep.mjs) can measure variants instead of guessing.
-
-export const W = 4;
-export const H = 4;
-export const N = W * H;
+// Every rule that affects balance — board size included — is exposed through a
+// `rules` object so the balance harness (src/sweep.mjs) can measure variants
+// instead of guessing.
 
 export const EMPTY = 0;
 export const bodyOf = (p) => 1 + p;
@@ -39,79 +36,79 @@ export const DIAG = [
 ];
 export const ALL8 = [...ORTHO, ...DIAG];
 
-export const xOf = (i) => i % W;
-export const yOf = (i) => (i / W) | 0;
-export const idx = (x, y) => y * W + x;
-export const onBoard = (x, y) => x >= 0 && x < W && y >= 0 && y < H;
+export const FILES = "abcdefgh";
 
-export const FILES = "abcd";
-export const sqName = (i) => FILES[xOf(i)] + (yOf(i) + 1);
+// Geometry helpers. The board is square, so a single `size` fixes everything.
+export const xOf = (i, size) => i % size;
+export const yOf = (i, size) => (i / size) | 0;
+export const idx = (x, y, size) => y * size + x;
+export const onBoard = (x, y, size) => x >= 0 && x < size && y >= 0 && y < size;
+export const sqName = (i, size) => FILES[xOf(i, size)] + (yOf(i, size) + 1);
 
-function step(i, dx, dy) {
-  const x = xOf(i) + dx;
-  const y = yOf(i) + dy;
-  return onBoard(x, y) ? idx(x, y) : -1;
+function step(i, dx, dy, size) {
+  const x = xOf(i, size) + dx;
+  const y = yOf(i, size) + dy;
+  return onBoard(x, y, size) ? idx(x, y, size) : -1;
+}
+
+/** Distance to the nearest edge: 0 on the rim. */
+export function rimOf(i, size) {
+  const x = xOf(i, size);
+  const y = yOf(i, size);
+  return Math.min(x, size - 1 - x, y, size - 1 - y);
 }
 
 // ---------------------------------------------------------------------------
 // Rules
 // ---------------------------------------------------------------------------
 
-// Tuned by self-play sweep (see docs/BALANCE.md). Measured at depth 4 over 180
-// low-noise games: first player 53.3%, draws 0%, ~21 plies, with all three win
-// mechanics (capture / invasion / judgement) firing regularly.
+// Tuned by self-play sweep — see docs/BALANCE.md for the measurements behind
+// every value here.
 export const DEFAULT_RULES = {
-  bodies: 3, // BODY pieces per player (plus exactly one BRAIN)
+  size: 6, // board side; the back rank holds `size` pieces
   stackRange: 2, // how far a whole stack may slide
   stackCapturesStack: true, // a stack may capture another stack outright
   tackle: true, // a BODY may charge a stack and knock the BRAIN off
   invasion: "lone", // 'none' | 'lone' | 'any' — only a dismounted BRAIN scores
+  invasionSurvive: 1, // own turn-starts the BRAIN must survive on the goal rank
   komi: 0.5, // judgement bonus for RED, compensating BLUE's first move
   openingTax: true, // BLUE's first move must be a plain BODY step (no mount)
-  redPreMounted: false, // RED starts already combined, BLUE does not
-  maxPly: 60,
+  maxPly: 120,
 };
 
 export function makeRules(over = {}) {
-  return { ...DEFAULT_RULES, ...over };
+  const r = { ...DEFAULT_RULES, ...over };
+  r.cells = r.size * r.size;
+  return r;
 }
 
-/** Back-rank setup for P0; P1 mirrors it through a 180-degree rotation. */
-function backRank(bodies) {
-  // index 0..3 == a1..d1
-  if (bodies <= 2) return ["B", "R", "B", null];
-  if (bodies === 3) return ["B", "R", "B", "B"];
-  return ["B", "R", "B", "B"]; // 4 bodies do not fit alongside the brain
+/**
+ * Back-rank setup for P0; P1 mirrors it through a 180-degree rotation.
+ * Every player fields one BRAIN and `size - 1` BODY pieces.
+ */
+function backRank(size) {
+  const pat = new Array(size).fill("B");
+  pat[1] = "R";
+  return pat;
 }
 
-export const goalRank = (p) => (p === 0 ? H - 1 : 0);
+export const goalRank = (p, size) => (p === 0 ? size - 1 : 0);
 
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
-export function initialState(rules = DEFAULT_RULES) {
-  const cells = new Int8Array(N);
-  const pat = backRank(rules.bodies);
-  for (let x = 0; x < W; x++) {
-    const p = pat[x];
-    if (!p) continue;
-    cells[x] = p === "B" ? bodyOf(0) : brainOf(0);
-    cells[N - 1 - x] = p === "B" ? bodyOf(1) : brainOf(1);
+export function initialState(rules = makeRules()) {
+  const size = rules.size;
+  const n = size * size;
+  const cells = new Int8Array(n);
+  const pat = backRank(size);
+  for (let x = 0; x < size; x++) {
+    cells[x] = pat[x] === "B" ? bodyOf(0) : brainOf(0);
+    cells[n - 1 - x] = pat[x] === "B" ? bodyOf(1) : brainOf(1);
   }
-  if (rules.redPreMounted) {
-    // RED's BRAIN begins the game already riding one of its BODY pieces, and
-    // RED fields one fewer piece on the board as a result. This is the
-    // compensation for moving second.
-    for (let i = 0; i < N; i++) if (cells[i] === brainOf(1)) cells[i] = stackOf(1);
-    for (let i = N - 1; i >= 0; i--) {
-      if (cells[i] === bodyOf(1)) {
-        cells[i] = EMPTY;
-        break;
-      }
-    }
-  }
-  return { cells, turn: 0, ply: 0, passes: 0, winner: null, reason: null, rules };
+  // held[p] = consecutive turn-starts p has had a scoring BRAIN on the goal rank
+  return { cells, turn: 0, ply: 0, passes: 0, held: [0, 0], winner: null, reason: null, rules };
 }
 
 export function cloneState(s) {
@@ -120,6 +117,7 @@ export function cloneState(s) {
     turn: s.turn,
     ply: s.ply,
     passes: s.passes,
+    held: [s.held[0], s.held[1]],
     winner: s.winner,
     reason: s.reason,
     rules: s.rules,
@@ -128,14 +126,14 @@ export function cloneState(s) {
 
 export function hashState(s) {
   let h = "";
-  for (let i = 0; i < N; i++) h += s.cells[i];
+  for (let i = 0; i < s.cells.length; i++) h += s.cells[i];
   return h + "|" + s.turn;
 }
 
 export function hasBrainOnBoard(s, p) {
   const b = brainOf(p);
   const st = stackOf(p);
-  for (let i = 0; i < N; i++) if (s.cells[i] === b || s.cells[i] === st) return true;
+  for (let i = 0; i < s.cells.length; i++) if (s.cells[i] === b || s.cells[i] === st) return true;
   return false;
 }
 
@@ -143,11 +141,12 @@ export function hasBrainOnBoard(s, p) {
 export function brainOnGoal(s, p) {
   const mode = s.rules.invasion;
   if (mode === "none") return false;
-  const y = goalRank(p);
+  const size = s.rules.size;
+  const y = goalRank(p, size);
   const lone = brainOf(p);
   const st = stackOf(p);
-  for (let x = 0; x < W; x++) {
-    const c = s.cells[idx(x, y)];
+  for (let x = 0; x < size; x++) {
+    const c = s.cells[idx(x, y, size)];
     if (c === lone) return true;
     if (mode === "any" && c === st) return true;
   }
@@ -159,18 +158,18 @@ export function brainOnGoal(s, p) {
  * repetition or the ply limit). Shuffling is therefore never a safe way to
  * hold a draw: the player who has pushed their BRAIN deeper — and failing
  * that, the player with more BODY pieces — takes the point.
- *
- * Returns { winner: 0 | 1 | -1, depth: [d0, d1], bodies: [b0, b1] }.
  */
 export function judge(s) {
+  const size = s.rules.size;
   const depth = [0, 0];
   const bodies = [0, 0];
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < s.cells.length; i++) {
     const c = s.cells[i];
     if (c === 0) continue;
     const o = ownerOf(c);
     if (isBody(c) || isStack(c)) bodies[o] += 1;
-    if (isBrain(c) || isStack(c)) depth[o] = H - 1 - Math.abs(yOf(i) - goalRank(o));
+    if (isBrain(c) || isStack(c))
+      depth[o] = size - 1 - Math.abs(yOf(i, size) - goalRank(o, size));
   }
   const komi = s.rules.komi || 0;
   let winner = -1;
@@ -199,18 +198,19 @@ export function judge(s) {
 export function legalMoves(s, player = s.turn) {
   const c = s.cells;
   const r = s.rules;
+  const size = r.size;
   const moves = [];
   const me = player;
   const opp = 1 - player;
 
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < c.length; i++) {
     const cell = c[i];
     if (cell === 0 || ownerOf(cell) !== me) continue;
     const stack = isStack(cell);
 
     if (isBody(cell) || stack) {
       for (const [dx, dy] of ORTHO) {
-        const t = step(i, dx, dy);
+        const t = step(i, dx, dy, size);
         if (t < 0) continue;
         const tc = c[t];
         if (tc === 0) {
@@ -218,7 +218,7 @@ export function legalMoves(s, player = s.turn) {
         } else if (ownerOf(tc) === opp) {
           if (isStack(tc)) {
             if (!r.tackle) continue;
-            const push = step(t, dx, dy);
+            const push = step(t, dx, dy, size);
             const blocked = push < 0 || c[push] !== 0;
             moves.push({ kind: "tackle", from: i, target: t, push: blocked ? -1 : push });
           } else {
@@ -232,7 +232,7 @@ export function legalMoves(s, player = s.turn) {
 
     if (isBrain(cell) || stack) {
       for (const [dx, dy] of DIAG) {
-        const t = step(i, dx, dy);
+        const t = step(i, dx, dy, size);
         if (t < 0) continue;
         const tc = c[t];
         if (tc === 0) moves.push({ kind: "brain", from: i, to: t, split: stack });
@@ -245,7 +245,7 @@ export function legalMoves(s, player = s.turn) {
       for (const [dx, dy] of ALL8) {
         let t = i;
         for (let n = 1; n <= r.stackRange; n++) {
-          t = step(t, dx, dy);
+          t = step(t, dx, dy, size);
           if (t < 0) break;
           const tc = c[t];
           if (tc === 0) {
@@ -307,12 +307,15 @@ export function applyMove(s, m) {
   n.passes = m.kind === "pass" ? s.passes + 1 : 0;
   n.turn = opp;
 
+  // The invasion clock ticks at the start of each player's own turn: a BRAIN
+  // that is still standing on the enemy home rank when its owner is about to
+  // move has survived one full enemy reply.
+  n.held[opp] = brainOnGoal(n, opp) ? n.held[opp] + 1 : 0;
+
   if (!hasBrainOnBoard(n, opp)) {
     n.winner = me;
     n.reason = "brain";
-  } else if (brainOnGoal(n, opp)) {
-    // the opponent planted a BRAIN on our home rank and it survived our reply,
-    // so they win as their turn begins
+  } else if (n.held[opp] >= n.rules.invasionSurvive) {
     n.winner = opp;
     n.reason = "invasion";
   } else if (n.passes >= 2 || n.ply >= n.rules.maxPly) {
@@ -329,21 +332,20 @@ export function movesOrPass(s) {
 
 export const isOver = (s) => s.winner !== null;
 
-export function moveText(m) {
+export function moveText(m, size) {
+  const sq = (i) => sqName(i, size);
   switch (m.kind) {
     case "body":
-      return `BODY ${sqName(m.from)}→${sqName(m.to)}${m.mount ? " 合体" : ""}${
-        m.capture ? " ×" : ""
-      }${m.split ? " 分離" : ""}`;
-    case "brain":
-      return `BRAIN ${sqName(m.from)}→${sqName(m.to)}${m.mount ? " 合体" : ""}${
+      return `BODY ${sq(m.from)}→${sq(m.to)}${m.mount ? " 合体" : ""}${m.capture ? " ×" : ""}${
         m.split ? " 分離" : ""
       }`;
+    case "brain":
+      return `BRAIN ${sq(m.from)}→${sq(m.to)}${m.mount ? " 合体" : ""}${m.split ? " 分離" : ""}`;
     case "stack":
-      return `MECH ${sqName(m.from)}→${sqName(m.to)}${m.capture ? " ×" : ""}`;
+      return `MECH ${sq(m.from)}→${sq(m.to)}${m.capture ? " ×" : ""}`;
     case "tackle":
-      return `TACKLE ${sqName(m.from)}→${sqName(m.target)}${
-        m.push < 0 ? " 撃墜!!" : ` (BRAIN→${sqName(m.push)})`
+      return `TACKLE ${sq(m.from)}→${sq(m.target)}${
+        m.push < 0 ? " 撃墜!!" : ` (BRAIN→${sq(m.push)})`
       }`;
     case "pass":
       return "パス";

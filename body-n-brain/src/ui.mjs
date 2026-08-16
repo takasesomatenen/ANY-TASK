@@ -1,23 +1,150 @@
 // BODY N BRAIN — browser UI. Inlined into index.html by build.mjs.
+// Player 0 is BLACK (solid pieces, moves first), player 1 is WHITE (outlined).
 
 const $ = (id) => document.getElementById(id);
 const boardEl = $("board");
 const logEl = $("log");
 const modebarEl = $("modebar");
+const barEl = $("bar");
 
 const RULES = makeRules();
+const SIZE = RULES.size;
+const SQ = (i) => sqName(i, SIZE);
+const AT = (x, y) => idx(x, y, SIZE);
+const SIDE = ["黒", "白"];
 
 let state, history, sel, mode, lastMove, repeats, busy;
-// Seat the AI occupies. The swap (pie) rule can hand it the other colour.
 let aiSide, swapPending, swapUsed;
+let teach = null; // tutorial progress, or null during a real game
 
-const MODES = [
-  { key: "stack", label: "合体駒で動く" },
-  { key: "brain", label: "BRAIN だけ降りる" },
-  { key: "body", label: "BODY だけ出る" },
+/** Only swap on a real advantage — never on evaluation noise. */
+const SWAP_MARGIN = 20;
+
+const vsAI = () => $("opponent").value === "ai" && !teach;
+const aiToMove = () => vsAI() && state.turn === aiSide;
+const humanSide = () => (vsAI() ? 1 - aiSide : 0);
+const flipped = () => humanSide() === 1;
+
+// ---------------------------------------------------------------------------
+// Tutorial — the player is taught by making each move themselves.
+// Every step hand-places a position and only accepts the move it is teaching.
+// ---------------------------------------------------------------------------
+
+const TUTORIAL = [
+  {
+    title: "BODY は縦横に1マス",
+    text: "<b>BODY（■）</b>は縦横に1マスだけ動きます。鈍いけれど、単体の敵駒を取れるのはこの駒です。動かしてみましょう。",
+    cells: () => ({ [AT(2, 1)]: bodyOf(0), [AT(4, 3)]: bodyOf(1) }),
+    accept: (m) => m.kind === "body",
+  },
+  {
+    title: "BRAIN は斜めに1マス、駒を取れない",
+    text: "<b>BRAIN（●）</b>は斜めに1マス。そして<b>絶対に駒を取れません</b>。右上の白い駒には入れないことを確かめてください。",
+    cells: () => ({ [AT(2, 1)]: brainOf(0), [AT(3, 2)]: bodyOf(1) }),
+    accept: (m) => m.kind === "brain",
+  },
+  {
+    title: "重ねると、別の駒になる",
+    text: "BRAIN を味方 BODY のマスへ動かすと<b>合体</b>。これがこのゲームの核心です。d3 の BODY に乗せてください。",
+    cells: () => ({ [AT(2, 1)]: brainOf(0), [AT(3, 2)]: bodyOf(0) }),
+    accept: (m) => m.mount === true,
+  },
+  {
+    title: "合体駒は8方向に2マス",
+    text: "合体駒は<b>8方向に最大2マス</b>滑ります。BODY にも BRAIN にも無い、まったく別の動きです。2マス動かしてみましょう。",
+    cells: () => ({ [AT(2, 2)]: stackOf(0), [AT(4, 4)]: bodyOf(1) }),
+    accept: (m) => m.kind === "stack" && m.dist === 2,
+  },
+  {
+    title: "合体駒はタックルで崩す",
+    text: "合体駒は単体の駒では<b>取れません</b>。代わりに BODY で体当たり（<b>タックル</b>）すると、上の BRAIN だけが1マス弾き飛ばされます。突撃した駒は動きません。",
+    cells: () => ({ [AT(1, 2)]: bodyOf(0), [AT(2, 2)]: stackOf(1), [AT(0, 0)]: brainOf(0) }),
+    accept: (m) => m.kind === "tackle",
+    pause: 1100,
+  },
+  {
+    title: "壁際の合体駒は即死する",
+    text: "弾き飛ばす先が<b>盤外</b>か他の駒なら、BRAIN は撃墜されて<b>その場で勝ち</b>。合体駒は最強ですが、縁に出ると一撃で終わります。",
+    cells: () => ({
+      [AT(SIZE - 2, 2)]: bodyOf(0),
+      [AT(SIZE - 1, 2)]: stackOf(1),
+      [AT(0, 0)]: brainOf(0),
+    }),
+    accept: (m) => m.kind === "tackle" && m.push < 0,
+    pause: 1100,
+  },
+  {
+    title: "もう一つの勝ち方：侵攻",
+    text: `敵陣の最奥（${SIZE}段目）に <b>BRAIN を降ろして</b>立たせ、相手の1手を生き延びても勝ちです。合体駒のまま乗り込んでも無効 — 必ず<b>分離</b>が要ります。BRAIN を最奥段へ降ろしてください。`,
+    cells: () => ({ [AT(2, SIZE - 2)]: stackOf(0), [AT(0, 0)]: brainOf(1) }),
+    accept: (m) => m.kind === "brain" && m.split && yOf(m.to, SIZE) === goalRank(0, SIZE),
+    pause: 900,
+  },
 ];
 
+function startTutorial() {
+  teach = { i: 0 };
+  aiSide = 1;
+  swapUsed = true;
+  swapPending = false;
+  loadTutorialStep();
+}
+
+function loadTutorialStep() {
+  const step = TUTORIAL[teach.i];
+  teach.done = false; // the new step has not been solved yet
+  state = initialState(RULES);
+  state.cells.fill(EMPTY);
+  for (const [i, v] of Object.entries(step.cells())) state.cells[i] = v;
+  state.ply = 4; // past the opening tax
+  state.turn = 0;
+  history = [];
+  repeats = new Map();
+  sel = null;
+  lastMove = null;
+  busy = false;
+  // auto-select when only one piece can make the move being taught
+  const froms = new Set(allowedMoves().map((m) => m.from));
+  if (froms.size === 1) sel = [...froms][0];
+  mode = defaultMode(sel);
+  render();
+}
+
+function tutorialAdvance() {
+  teach.i += 1;
+  if (teach.i >= TUTORIAL.length) {
+    teach = null;
+    rememberTutorialDone();
+    showVeil("チュートリアル終了", "7つのルールはこれで全部です。実戦へどうぞ。", [
+      ["対局を始める", () => (closeVeil(), newGame()), true],
+    ]);
+    return;
+  }
+  loadTutorialStep();
+}
+
+const TEACH_KEY = "bodynbrain.taught";
+function tutorialWasDone() {
+  try {
+    return localStorage.getItem(TEACH_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function rememberTutorialDone() {
+  try {
+    localStorage.setItem(TEACH_KEY, "1");
+  } catch {
+    /* private mode — just replay the tutorial next time */
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Game
+// ---------------------------------------------------------------------------
+
 function newGame() {
+  teach = null;
   state = initialState(RULES);
   history = [];
   repeats = new Map();
@@ -29,209 +156,195 @@ function newGame() {
   swapPending = false;
   swapUsed = false;
   logEl.innerHTML = "";
-  $("banner").classList.remove("show");
+  closeVeil();
   render();
 }
 
-const vsAI = () => $("opponent").value === "ai";
-const aiToMove = () => vsAI() && state.turn === aiSide;
-/** The colour the person at the keyboard is playing. */
-const humanSide = () => (vsAI() ? 1 - aiSide : 0);
-/** Keep the human's own back rank at the bottom, even after a swap. */
-const flipped = () => humanSide() === 1;
-
-/** Only swap on a real advantage — never on evaluation noise. */
-const SWAP_MARGIN = 20;
-
-function showBanner(title, colour, text, buttons) {
-  $("bannerTitle").textContent = title;
-  $("bannerTitle").style.color = colour;
-  $("bannerText").textContent = text;
-  const box = $("bannerBtns");
-  box.innerHTML = "";
-  for (const [label, fn] of buttons) {
-    const b = document.createElement("button");
-    b.textContent = label;
-    b.onclick = fn;
-    box.appendChild(b);
-  }
-  $("banner").classList.add("show");
+/** Legal moves, narrowed to what the current tutorial step is teaching. */
+function allowedMoves() {
+  const ms = legalMoves(state);
+  return teach ? ms.filter(TUTORIAL[teach.i].accept) : ms;
 }
 
-const closeBanner = () => $("banner").classList.remove("show");
+const movesFrom = (i) => allowedMoves().filter((m) => m.from === i);
 
-// --- move helpers ----------------------------------------------------------
-
-function movesFrom(i) {
-  return legalMoves(state).filter((m) => m.from === i);
+function defaultMode(i) {
+  if (i === null || i === undefined) return "stack";
+  const kinds = new Set(movesFrom(i).map((x) => x.kind));
+  return kinds.has("stack") ? "stack" : kinds.has("brain") ? "brain" : "body";
 }
 
-/** Moves offered for the current selection, filtered by the active mode. */
+const MODES = [
+  { key: "stack", label: "合体駒で動く", has: (m) => m.kind === "stack" || m.kind === "tackle" },
+  { key: "brain", label: "BRAIN だけ降りる", has: (m) => m.kind === "brain" },
+  { key: "body", label: "BODY だけ出る", has: (m) => m.kind === "body" || m.kind === "tackle" },
+];
+
 function offered() {
   if (sel === null) return [];
   const all = movesFrom(sel);
   if (!isStack(state.cells[sel])) return all;
-  if (mode === "stack") return all.filter((m) => m.kind === "stack" || m.kind === "tackle");
-  if (mode === "brain") return all.filter((m) => m.kind === "brain");
-  return all.filter((m) => m.kind === "body" || m.kind === "tackle");
+  return all.filter(MODES.find((m) => m.key === mode).has);
 }
 
 const targetOf = (m) => (m.kind === "tackle" ? m.target : m.to);
 
-// --- rendering -------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
 
 function pieceHTML(c) {
   const p = ownerOf(c);
-  const cls = `piece p${p}`;
-  if (isBody(c)) return `<div class="${cls}"><div class="body"></div></div>`;
-  if (isBrain(c)) return `<div class="${cls} lonebrain"><div class="brain"></div></div>`;
-  return `<div class="${cls} stacked"><div class="body"></div><div class="brain"></div></div>`;
+  if (isBody(c)) return `<div class="piece p${p}"><div class="pbody"></div></div>`;
+  if (isBrain(c)) return `<div class="piece p${p} lone"><div class="pbrain"></div></div>`;
+  return `<div class="piece p${p} stacked"><div class="pbody"></div><div class="pbrain"></div></div>`;
 }
+
+const markClass = (m) =>
+  m.kind === "tackle" ? "mk-tackle" : m.capture ? "mk-take" : m.mount ? "mk-mount" : "mk-move";
 
 function render() {
   const marks = new Map();
   for (const m of offered()) marks.set(targetOf(m), m);
+  const teachTargets = teach ? new Set(allowedMoves().map(targetOf)) : null;
 
+  boardEl.style.gridTemplateColumns = `repeat(${SIZE},1fr)`;
   boardEl.innerHTML = "";
   const flip = flipped();
-  for (let row = 0; row < H; row++) {
-    for (let col = 0; col < W; col++) {
-      // 180-degree rotation when the human plays RED, so their own pieces are
-      // always the ones nearest to them.
-      const y = flip ? row : H - 1 - row;
-      const x = flip ? W - 1 - col : col;
-      const i = idx(x, y);
-      const cell = document.createElement("div");
-      cell.className = "cell" + ((x + y) % 2 ? " dark" : "");
-      if (y === goalRank(0)) cell.className += " goal0";
-      if (y === goalRank(1)) cell.className += " goal1";
-      if (i === sel) cell.className += " sel";
-      if (lastMove && (lastMove.from === i || targetOf(lastMove) === i)) cell.className += " lastto";
+  for (let row = 0; row < SIZE; row++) {
+    for (let col = 0; col < SIZE; col++) {
+      // 180-degree rotation when the human plays WHITE, so their own back rank
+      // is always the near one
+      const y = flip ? row : SIZE - 1 - row;
+      const x = flip ? SIZE - 1 - col : col;
+      const i = AT(x, y);
 
-      let html = `<span class="coord">${sqName(i)}</span>`;
+      const cell = document.createElement("div");
+      let cls = "cell" + ((x + y) % 2 ? " alt" : "");
+      if (y === 0 || y === SIZE - 1) cls += " goal";
+      if (i === sel) cls += " sel";
+      if (lastMove && (lastMove.from === i || targetOf(lastMove) === i)) cls += " last";
+      if (teachTargets && teachTargets.has(i) && marks.size === 0) cls += " teachtarget";
+      cell.className = cls;
+
+      let html = `<span class="coord">${SQ(i)}</span>`;
       const c = state.cells[i];
       if (c !== 0) html += pieceHTML(c);
       const m = marks.get(i);
-      if (m) {
-        const kind = m.kind === "tackle" ? "tack" : m.capture || m.mount ? "cap" : "";
-        html += `<span class="marker ${kind}"><i></i></span>`;
-      }
+      if (m) html += `<span class="mk ${markClass(m)}"><i></i></span>`;
       cell.innerHTML = html;
       cell.onclick = () => onCell(i);
       boardEl.appendChild(cell);
     }
   }
 
-  const p = state.turn;
-  $("turnDot").style.background = p === 0 ? "var(--blue)" : "var(--red)";
-  const who = vsAI() ? (p === aiSide ? "AI" : "あなた") : p === 0 ? "先手" : "後手";
-  $("turnText").textContent = `${p === 0 ? "BLUE" : "RED"} の手番 — ${who}`;
-  $("undo").disabled = history.length === 0 || busy || swapPending;
+  renderBar();
   renderModebar();
+  $("undo").disabled = !history.length || busy || swapPending || !!teach;
+}
+
+function renderBar() {
+  if (teach) {
+    const step = TUTORIAL[teach.i];
+    barEl.className = "bar teach";
+    barEl.innerHTML =
+      `<span class="step">${teach.i + 1}/${TUTORIAL.length}</span>` +
+      `<p><b>${step.title}</b><br>${step.text}</p>`;
+    return;
+  }
+  barEl.className = "bar";
+  if (swapPending) {
+    barEl.innerHTML =
+      `<span class="step">SWAP</span>` +
+      `<p>先手の初手を見て、<b>盤ごと陣営を入れ替えられます</b>。</p>`;
+    return;
+  }
+  const p = state.turn;
+  const who = vsAI() ? (p === aiSide ? "AI" : "あなた") : p === 0 ? "先手" : "後手";
+  barEl.innerHTML =
+    `<span class="turnmark${p === 0 ? " solid" : ""}"></span>` +
+    `<p><b>${SIDE[p]}の手番</b> — ${who}${busy ? "（思考中…）" : ""}</p>`;
 }
 
 function renderModebar() {
   modebarEl.innerHTML = "";
+  const add = (label, fn, cls) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = fn;
+    modebarEl.appendChild(b);
+    return b;
+  };
+
+  if (teach) {
+    if (teach.done) add("次へ →", tutorialAdvance, "primary");
+    else {
+      const s = document.createElement("span");
+      s.className = "hint";
+      s.textContent = "印のついたマスをクリック";
+      modebarEl.appendChild(s);
+    }
+    add("スキップ", () => {
+      teach = null;
+      rememberTutorialDone();
+      newGame();
+    });
+    return;
+  }
+
   if (swapPending) {
-    const hint = document.createElement("span");
-    hint.className = "hint";
-    hint.textContent = "スワップ権：先手の初手を見て、盤ごと入れ替われます　";
-    modebarEl.appendChild(hint);
-    for (const [label, doSwap] of [
-      ["入れ替える", true],
-      ["このまま", false],
-    ]) {
-      const b = document.createElement("button");
-      b.textContent = label;
-      b.onclick = () => resolveSwap(doSwap);
-      modebarEl.appendChild(b);
+    add("入れ替える", () => resolveSwap(true), "primary");
+    add("このまま", () => resolveSwap(false));
+    return;
+  }
+
+  if (sel !== null && isStack(state.cells[sel])) {
+    for (const md of MODES) {
+      const b = add(md.label, () => {
+        mode = md.key;
+        render();
+      });
+      if (md.key === mode) b.className = "on";
+      b.disabled = !movesFrom(sel).some(md.has);
     }
     return;
   }
-  if (sel === null || !isStack(state.cells[sel])) {
-    const s = document.createElement("span");
-    s.className = "hint";
-    s.textContent =
-      state.ply === 0 && RULES.openingTax
-        ? "先手の初手は BODY を1マス動かすだけ（先手のコミ）"
-        : sel === null
-        ? "駒をクリックして動かします"
-        : "行き先をクリック（合体駒は動き方を選べます）";
-    modebarEl.appendChild(s);
-    return;
-  }
-  for (const md of MODES) {
-    const b = document.createElement("button");
-    b.textContent = md.label;
-    if (md.key === mode) b.className = "on";
-    const has = movesFrom(sel).some((m) =>
-      md.key === "stack"
-        ? m.kind === "stack" || m.kind === "tackle"
-        : md.key === "brain"
-        ? m.kind === "brain"
-        : m.kind === "body" || m.kind === "tackle"
-    );
-    b.disabled = !has;
-    b.onclick = () => {
-      mode = md.key;
-      render();
-    };
-    modebarEl.appendChild(b);
-  }
+
+  const s = document.createElement("span");
+  s.className = "hint";
+  s.textContent =
+    state.ply === 0 && RULES.openingTax
+      ? "先手の初手は BODY を1マス動かすだけ（先手のコミ）"
+      : sel === null
+      ? "駒をクリック → 行き先をクリック"
+      : "行き先をクリック";
+  modebarEl.appendChild(s);
 }
 
 function logMove(player, m) {
   const d = document.createElement("div");
-  d.className = player === 0 ? "b" : "r";
+  if (player === 0) d.className = "b";
   d.textContent = `${String(Math.floor(state.ply / 2) + 1).padStart(2, " ")}. ${
-    player === 0 ? "B" : "R"
-  }  ${moveText(m)}`;
+    SIDE[player]
+  } ${moveText(m, SIZE)}`;
   logEl.appendChild(d);
   logEl.scrollTop = logEl.scrollHeight;
 }
 
-// --- interaction -----------------------------------------------------------
-
-function resolveSwap(doSwap) {
-  swapPending = false;
-  swapUsed = true;
-  if (doSwap) {
-    aiSide = 1 - aiSide;
-    const d = document.createElement("div");
-    d.className = "meta";
-    d.textContent = "   — スワップ発動：両者の陣営が入れ替わりました —";
-    logEl.appendChild(d);
-  }
-  render();
-
-  // Losing your colour on move one is bewildering unless it is spelled out.
-  if (doSwap && vsAI()) {
-    const you = humanSide() === 0 ? "BLUE（先手）" : "RED（後手）";
-    showBanner(
-      "スワップ発動",
-      "var(--gold)",
-      `AI があなたの初手を見て陣営を入れ替えました。あなたは ${you} です。` +
-        `盤はあなたの陣が手前に来るよう反転しています。`,
-      [["対局を続ける", () => {
-        closeBanner();
-        if (aiToMove()) aiTurn();
-      }]]
-    );
-    return;
-  }
-  if (aiToMove()) aiTurn();
-}
+// ---------------------------------------------------------------------------
+// Interaction
+// ---------------------------------------------------------------------------
 
 function onCell(i) {
-  if (busy || swapPending || isOver(state)) return;
+  if (busy || swapPending || isOver(state) || (teach && teach.done)) return;
   const m = offered().find((mv) => targetOf(mv) === i);
   if (m) return void play(m);
 
   const c = state.cells[i];
-  if (c !== 0 && ownerOf(c) === state.turn) {
+  if (c !== 0 && ownerOf(c) === state.turn && movesFrom(i).length) {
     sel = i;
-    const kinds = new Set(movesFrom(i).map((x) => x.kind));
-    mode = kinds.has("stack") ? "stack" : kinds.has("brain") ? "brain" : "body";
+    mode = defaultMode(i);
   } else {
     sel = null;
   }
@@ -241,10 +354,22 @@ function onCell(i) {
 function play(m) {
   const player = state.turn;
   history.push(state);
-  logMove(player, m);
+  if (!teach) logMove(player, m);
   state = applyMove(state, m);
   lastMove = m;
   sel = null;
+
+  if (teach) {
+    teach.done = true;
+    render();
+    const wait = TUTORIAL[teach.i].pause || 550;
+    busy = true;
+    setTimeout(() => {
+      busy = false;
+      render();
+    }, wait);
+    return;
+  }
 
   const h = hashState(state);
   const n = (repeats.get(h) || 0) + 1;
@@ -256,9 +381,8 @@ function play(m) {
   render();
   if (isOver(state)) return void finish();
 
-  // The swap (pie) rule: having seen BLUE's opening move, the second player may
-  // take the BLUE side instead. This is what actually neutralises the
-  // first-move advantage — see docs/BALANCE.md.
+  // Swap (pie) rule: having seen BLACK's opening, the second player may take
+  // the BLACK side instead. This is what neutralises the first-move advantage.
   if ($("swapRule").checked && !swapUsed && state.ply === 1) {
     if (vsAI() && state.turn === aiSide) return void aiSwapDecision();
     swapPending = true;
@@ -274,13 +398,35 @@ function aiSwapDecision() {
   render();
   setTimeout(() => {
     const depth = Math.max(2, Number($("level").value) - 1);
-    // Take the swap only when the opening gave the first player a real edge.
-    // A bare > 0 test swaps on evaluation noise, which reads to the player as
-    // the game taking their colour away for no reason.
     const take = search(state, depth, 1 - state.turn).score > SWAP_MARGIN;
     busy = false;
     resolveSwap(take);
   }, 260);
+}
+
+function resolveSwap(doSwap) {
+  swapPending = false;
+  swapUsed = true;
+  if (doSwap) {
+    aiSide = 1 - aiSide;
+    const d = document.createElement("div");
+    d.className = "meta";
+    d.textContent = "— スワップ発動：陣営が入れ替わりました —";
+    logEl.appendChild(d);
+  }
+  render();
+
+  if (doSwap && vsAI()) {
+    showVeil(
+      "スワップ発動",
+      `AI があなたの初手を見て陣営を入れ替えました。あなたは <b>${
+        SIDE[humanSide()]
+      }</b> です。盤はあなたの陣が手前に来るよう反転しています。`,
+      [["対局を続ける", () => (closeVeil(), aiToMove() && aiTurn()), true]]
+    );
+    return;
+  }
+  if (aiToMove()) aiTurn();
 }
 
 function aiTurn() {
@@ -291,7 +437,7 @@ function aiTurn() {
     const m = chooseMove(state, depth, Math.random, depth <= 2 ? 0.5 : 0.06);
     busy = false;
     play(m);
-  }, 220);
+  }, 200);
 }
 
 const REASONS = {
@@ -304,22 +450,17 @@ const REASONS = {
 function finish() {
   const w = state.winner;
   const j = judge(state);
-  const side = w === 0 ? "BLUE" : "RED";
   const tail = vsAI() && w !== -1 ? `（${w === humanSide() ? "あなた" : "AI"}）` : "";
   const detail =
     state.reason === "repetition" || state.reason === "judgement"
-      ? `（侵攻度 ${j.depth[0]} 対 ${j.depth[1]}＋コミ${j.komi}、BODY ${j.bodies[0]} 対 ${j.bodies[1]}）`
+      ? `　侵攻度 ${j.depth[0]} 対 ${j.depth[1]}＋コミ${j.komi}、BODY ${j.bodies[0]} 対 ${j.bodies[1]}`
       : "";
-  showBanner(
-    w === -1 ? "引き分け" : `${side} の勝ち${tail}`,
-    w === -1 ? "var(--gold)" : w === 0 ? "var(--blue)" : "var(--red)",
+  showVeil(
+    w === -1 ? "引き分け" : `${SIDE[w]}の勝ち${tail}`,
     (REASONS[state.reason] || "") + detail,
     [
-      ["もう一局", newGame],
-      ["待った", () => {
-        closeBanner();
-        undo();
-      }],
+      ["もう一局", () => (closeVeil(), newGame()), true],
+      ["待った", () => (closeVeil(), undo())],
     ]
   );
 }
@@ -331,9 +472,8 @@ function popOne() {
 }
 
 function undo() {
-  if (!history.length || busy || swapPending) return;
+  if (!history.length || busy || swapPending || teach) return;
   popOne();
-  // Rewinding past the swap decision must also give the colours back.
   if (state.ply <= 1 && swapUsed) {
     if (humanSide() === 1) aiSide = 1 - aiSide;
     swapUsed = false;
@@ -341,51 +481,67 @@ function undo() {
   while (history.length && aiToMove()) popOne();
   sel = null;
   lastMove = null;
-  closeBanner();
+  closeVeil();
   render();
 }
 
+// ---------------------------------------------------------------------------
+// Overlay
+// ---------------------------------------------------------------------------
+
+function showVeil(title, html, buttons) {
+  $("veilTitle").textContent = title;
+  $("veilText").innerHTML = html;
+  const box = $("veilBtns");
+  box.innerHTML = "";
+  for (const [label, fn, primary] of buttons) {
+    const b = document.createElement("button");
+    b.textContent = label;
+    if (primary) b.className = "primary";
+    b.onclick = fn;
+    box.appendChild(b);
+  }
+  $("veil").classList.add("show");
+}
+const closeVeil = () => $("veil").classList.remove("show");
+
+// ---------------------------------------------------------------------------
+// Static panels
+// ---------------------------------------------------------------------------
+
+$("tagline").textContent = `${SIZE} × ${SIZE} — STACK TO CHANGE WHAT A PIECE IS`;
+
+$("legend").innerHTML = [
+  [`<span class="mk mk-move"><i></i></span>`, "移動できる"],
+  [`<span class="mk mk-take"><i></i></span>`, "取れる"],
+  [`<span class="mk mk-mount"><i></i></span>`, "合体できる"],
+  [`<span class="mk mk-tackle"><i></i></span>`, "タックルできる"],
+  [`<span class="piece p0"><span class="pbody"></span></span>`, "黒 = 先手（塗り）"],
+  [`<span class="piece p1"><span class="pbody"></span></span>`, "白 = 後手（枠）"],
+  [`<span class="piece p0 stacked"><span class="pbody"></span><span class="pbrain"></span></span>`, "合体駒"],
+]
+  .map(([sw, t]) => `<span class="sw">${sw}</span><span>${t}</span>`)
+  .join("");
+
+$("rules").innerHTML = `<dl>
+<dt>BODY ■ — 縦横に1マス</dt><dd>単体の敵駒を取れる。合体駒にはタックルできる。</dd>
+<dt>BRAIN ● — 斜めに1マス</dt><dd>駒を取れない。取られたら負け。</dd>
+<dt>合体駒 — 8方向に最大2マス</dt><dd>飛び越え不可。単体の駒では取れず、合体駒だけが取れる。</dd>
+<dt>タックル</dt><dd>BODY が隣の敵合体駒へ突撃すると、上の BRAIN が1マス弾かれる。
+  行き先が盤外・他の駒なら撃墜＝勝ち。突撃側は動かない。</dd>
+<dt>勝ち方は2つ</dt><dd>相手の BRAIN を取る。または単体の BRAIN を敵陣最奥に立たせ、相手の1手を生き延びる。</dd>
+<dt>判定</dt><dd>千日手・${RULES.maxPly}手で判定。BRAIN がより深い側の勝ち、同じなら BODY の多い側。後手にコミ ${RULES.komi}。</dd>
+<dt>先後の調整</dt><dd>先手の初手は BODY 移動のみ。さらに後手は初手を見てから陣営を入れ替えられる（スワップ）。</dd>
+</dl>`;
+
 $("newGame").onclick = newGame;
 $("undo").onclick = undo;
+$("teach").onclick = startTutorial;
 $("opponent").onchange = newGame;
 $("swapRule").onchange = newGame;
-$("banner").onclick = (e) => {
-  if (e.target === $("banner")) closeBanner();
+$("veil").onclick = (e) => {
+  if (e.target === $("veil")) closeVeil();
 };
 
-$("rules").innerHTML = `
-<b>目的</b>
-<ul>
-  <li>相手の <b>BRAIN</b> を捕獲する</li>
-  <li>または、単体の <b>BRAIN</b> を相手の最奥段に置き、相手の1手を生き延びる（<b>侵攻勝ち</b>）</li>
-</ul>
-<b>動き</b>
-<ul>
-  <li><b>BODY</b>（四角）… 縦横に1マス。単体の敵駒を取れる。</li>
-  <li><b>BRAIN</b>（丸）… 斜めに1マス。<code>絶対に駒を取れない</code>。</li>
-  <li><b>合体駒</b>（BRAIN が BODY に乗った状態）… 8方向に最大2マス滑る。飛び越え不可。</li>
-</ul>
-<b>合体と分離</b>
-<ul>
-  <li>BRAIN が味方 BODY のマスへ入る／BODY が味方 BRAIN のマスへ入ると <b>合体</b>。</li>
-  <li>合体駒からは「BRAIN だけ降りる」「BODY だけ出る」も選べる（<b>分離</b>）。</li>
-</ul>
-<b>タックル</b>
-<ul>
-  <li>BODY は隣接する敵の合体駒へ突撃できる。合体駒は取れないが、
-      上の BRAIN が突撃方向へ1マス <b>叩き落とされる</b>。
-      その先が盤外か塞がっていれば BRAIN は <code>撃墜＝負け</code>。突撃側は動かない。</li>
-</ul>
-<b>判定</b>
-<ul>
-  <li>千日手・${RULES.maxPly}手到達は <b>判定</b>：BRAIN がより深く侵攻している側の勝ち。
-      同じなら BODY の多い側。後手には <b>コミ ${RULES.komi}</b> が付く。</li>
-</ul>
-<b>先手・後手の調整</b>
-<ul>
-  <li><b>先手の初手</b>は BODY を1マス動かすだけ（合体・侵攻の禁止）。</li>
-  <li><b>スワップ</b>：後手は先手の初手を見てから、盤ごと陣営を入れ替えられる。
-      先手が有利な初手を指すほど、奪われる。真剣勝負ではこれを推奨。</li>
-</ul>`;
-
-newGame();
+if (tutorialWasDone()) newGame();
+else startTutorial();

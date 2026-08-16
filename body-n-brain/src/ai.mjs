@@ -1,6 +1,5 @@
 // BODY N BRAIN — evaluation + alpha-beta search
 import {
-  N,
   legalMoves,
   applyMove,
   movesOrPass,
@@ -11,21 +10,14 @@ import {
   isStack,
   xOf,
   yOf,
-  ORTHO,
-  onBoard,
   idx,
+  onBoard,
+  rimOf,
+  ORTHO,
   goalRank,
 } from "./engine.mjs";
 
 export const WIN = 100000;
-
-// Distance from the nearest wall: 0 on the rim, 1 in the 2x2 centre.
-const RIM = new Int8Array(N);
-for (let i = 0; i < N; i++) {
-  const x = xOf(i);
-  const y = yOf(i);
-  RIM[i] = Math.min(x, 3 - x, y, 3 - y);
-}
 
 const V_BODY = 100;
 const V_STACK_BONUS = 55; // being mounted is worth roughly half a BODY
@@ -43,8 +35,10 @@ export function evaluate(s, me) {
     return s.winner === me ? WIN : -WIN;
   }
   const c = s.cells;
+  const size = s.rules.size;
+  const far = size - 1;
   let score = 0;
-  for (let i = 0; i < N; i++) {
+  for (let i = 0; i < c.length; i++) {
     const cell = c[i];
     if (cell === 0) continue;
     const o = ownerOf(cell);
@@ -54,15 +48,17 @@ export function evaluate(s, me) {
     else if (isBrain(cell)) v += V_LONE_BRAIN;
     else if (isStack(cell)) {
       v += V_BODY + V_STACK_BONUS;
-      if (RIM[i] === 0) v += V_WALL_BRAIN;
+      if (rimOf(i, size) === 0) v += V_WALL_BRAIN;
     }
     if (s.rules.invasion !== "none" && (isBrain(cell) || isStack(cell))) {
       const scores = s.rules.invasion === "any" || isBrain(cell);
-      const progress = 3 - Math.abs(yOf(i) - goalRank(o));
+      const progress = far - Math.abs(yOf(i, size) - goalRank(o, size));
       v += V_ADVANCE * progress;
-      if (progress === 3 && scores) v += V_ON_GOAL;
+      // worth more the closer the invasion clock is to running out
+      if (progress === far && scores)
+        v += (V_ON_GOAL * (s.held[o] + 1)) / s.rules.invasionSurvive;
     }
-    v += V_CENTRE * RIM[i];
+    v += V_CENTRE * rimOf(i, size);
     score += sign * v;
   }
   // mobility of the side to move (cheap proxy for initiative)
@@ -71,7 +67,7 @@ export function evaluate(s, me) {
   return score;
 }
 
-function scoreMove(s, m) {
+function scoreMove(m) {
   // cheap move ordering: wins first, then captures, then tackles
   if (m.kind === "tackle") return m.push < 0 ? 9000 : 400;
   if (m.capture) return isBrain(m.capture) ? 9000 : 500;
@@ -83,7 +79,7 @@ export function search(s, depth, me, alpha = -Infinity, beta = Infinity) {
   if (isOver(s) || depth === 0) return { score: evaluate(s, me), move: null };
 
   const moves = movesOrPass(s);
-  moves.sort((a, b) => scoreMove(s, b) - scoreMove(s, a));
+  moves.sort((a, b) => scoreMove(b) - scoreMove(a));
 
   const maximizing = s.turn === me;
   let best = null;
@@ -117,8 +113,7 @@ export function chooseMove(s, depth, rng = Math.random, temperature = 0) {
   if (moves.length === 1) return moves[0];
   const scored = moves.map((m) => {
     const ns = applyMove(s, m);
-    const r = search(ns, depth - 1, me);
-    return { m, score: r.score };
+    return { m, score: search(ns, depth - 1, me).score };
   });
   scored.sort((a, b) => b.score - a.score);
   if (temperature <= 0) {
@@ -132,15 +127,16 @@ export function chooseMove(s, depth, rng = Math.random, temperature = 0) {
 
 /** Squares from which an enemy BODY could tackle the stack at `i` fatally. */
 export function fatalTackleSquares(s, i) {
+  const size = s.rules.size;
   const out = [];
   for (const [dx, dy] of ORTHO) {
-    const fx = xOf(i) - dx;
-    const fy = yOf(i) - dy;
-    if (!onBoard(fx, fy)) continue;
-    const px = xOf(i) + dx;
-    const py = yOf(i) + dy;
-    const blocked = !onBoard(px, py) || s.cells[idx(px, py)] !== 0;
-    if (blocked) out.push(idx(fx, fy));
+    const fx = xOf(i, size) - dx;
+    const fy = yOf(i, size) - dy;
+    if (!onBoard(fx, fy, size)) continue;
+    const px = xOf(i, size) + dx;
+    const py = yOf(i, size) + dy;
+    const blocked = !onBoard(px, py, size) || s.cells[idx(px, py, size)] !== 0;
+    if (blocked) out.push(idx(fx, fy, size));
   }
   return out;
 }
