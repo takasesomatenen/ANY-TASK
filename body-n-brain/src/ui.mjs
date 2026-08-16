@@ -16,12 +16,16 @@ const SIDE = ["黒", "白"];
 let state, history, sel, mode, lastMove, repeats, busy;
 let aiSide, swapPending, swapUsed;
 let teach = null; // tutorial progress, or null during a real game
+let paused = false; // watch mode only
 
 /** Only swap on a real advantage — never on evaluation noise. */
 const SWAP_MARGIN = 20;
 
-const vsAI = () => $("opponent").value === "ai" && !teach;
-const aiToMove = () => vsAI() && state.turn === aiSide;
+/** 'ai' = you vs AI, 'human' = two people, 'watch' = AI vs AI. */
+const opponent = () => (teach ? "human" : $("opponent").value);
+const watching = () => opponent() === "watch";
+const vsAI = () => opponent() === "ai";
+const aiToMove = () => watching() || (vsAI() && state.turn === aiSide);
 const humanSide = () => (vsAI() ? 1 - aiSide : 0);
 const flipped = () => humanSide() === 1;
 
@@ -138,9 +142,11 @@ function newGame() {
   aiSide = 1;
   swapPending = false;
   swapUsed = false;
+  paused = false;
   logEl.innerHTML = "";
   closeVeil();
   render();
+  if (aiToMove()) aiTurn();
 }
 
 /** Legal moves, narrowed to what the current tutorial step is teaching. */
@@ -223,7 +229,7 @@ function render() {
 
   renderBar();
   renderModebar();
-  $("undo").disabled = !history.length || busy || swapPending || !!teach;
+  $("undo").disabled = !history.length || busy || swapPending || !!teach || watching();
 }
 
 function renderBar() {
@@ -243,10 +249,19 @@ function renderBar() {
     return;
   }
   const p = state.turn;
-  const who = vsAI() ? (p === aiSide ? "AI" : "あなた") : p === 0 ? "先手" : "後手";
+  const who = watching()
+    ? `AI ${p === 0 ? "①" : "②"}`
+    : vsAI()
+    ? p === aiSide
+      ? "AI"
+      : "あなた"
+    : p === 0
+    ? "先手"
+    : "後手";
+  const tail = paused ? "（一時停止中）" : busy ? "（思考中…）" : "";
   barEl.innerHTML =
     `<span class="turnmark${p === 0 ? " solid" : ""}"></span>` +
-    `<p><b>${SIDE[p]}の手番</b> — ${who}${busy ? "（思考中…）" : ""}</p>`;
+    `<p><b>${SIDE[p]}の手番</b> — ${who}${tail}</p>`;
 }
 
 function renderModebar() {
@@ -278,6 +293,27 @@ function renderModebar() {
   if (swapPending) {
     add("入れ替える", () => resolveSwap(true), "primary");
     add("このまま", () => resolveSwap(false));
+    return;
+  }
+
+  if (watching()) {
+    if (isOver(state)) {
+      add("もう一局", newGame, "primary");
+    } else {
+      add(paused ? "再開" : "一時停止", () => {
+        paused = !paused;
+        render();
+        if (!paused && aiToMove()) aiTurn();
+      });
+      add("1手進める", () => {
+        paused = true;
+        aiTurn();
+      }).disabled = busy;
+    }
+    const s = document.createElement("span");
+    s.className = "hint";
+    s.textContent = "AI 同士の対戦を観戦中";
+    modebarEl.appendChild(s);
     return;
   }
 
@@ -321,7 +357,7 @@ function logMove(player, m) {
 // ---------------------------------------------------------------------------
 
 function onCell(i) {
-  if (busy || swapPending || isOver(state) || (teach && teach.done)) return;
+  if (busy || swapPending || watching() || isOver(state) || (teach && teach.done)) return;
   const m = offered().find((mv) => targetOf(mv) === i);
   if (m) return void play(m);
 
@@ -368,13 +404,13 @@ function play(m) {
   // Swap (pie) rule: having seen BLACK's opening, the second player may take
   // the BLACK side instead. This is what neutralises the first-move advantage.
   if ($("swapRule").checked && !swapUsed && state.ply === 1) {
-    if (vsAI() && state.turn === aiSide) return void aiSwapDecision();
+    if (watching() || (vsAI() && state.turn === aiSide)) return void aiSwapDecision();
     swapPending = true;
     return void render();
   }
 
   if (!legalMoves(state).length) return void setTimeout(() => play({ kind: "pass" }), 350);
-  if (aiToMove()) aiTurn();
+  if (aiToMove() && !paused) aiTurn();
 }
 
 function aiSwapDecision() {
@@ -400,7 +436,7 @@ function resolveSwap(doSwap) {
   }
   render();
 
-  if (doSwap && vsAI()) {
+  if (doSwap && vsAI() && !watching()) {
     showVeil(
       "スワップ発動",
       `AI があなたの初手を見て陣営を入れ替えました。あなたは <b>${
@@ -430,7 +466,7 @@ function aiTurn() {
     const m = chooseMove(state, depth, Math.random, temp);
     busy = false;
     play(m);
-  }, 200);
+  }, watching() ? 550 : 200); // slower when nobody is choosing, so it can be followed
 }
 
 const REASONS = {
@@ -443,7 +479,8 @@ const REASONS = {
 function finish() {
   const w = state.winner;
   const j = judge(state);
-  const tail = vsAI() && w !== -1 ? `（${w === humanSide() ? "あなた" : "AI"}）` : "";
+  const tail =
+    w === -1 ? "" : watching() ? `（AI ${w === 0 ? "①" : "②"}）` : vsAI() ? `（${w === humanSide() ? "あなた" : "AI"}）` : "";
   const detail =
     state.reason === "repetition" || state.reason === "judgement"
       ? `　侵攻度 ${j.depth[0]} 対 ${j.depth[1]}＋コミ${j.komi}、BODY ${j.bodies[0]} 対 ${j.bodies[1]}`
