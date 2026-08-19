@@ -1,0 +1,17 @@
+{
+  "_comment": "KSD案件（特別史跡加曽利貝塚新博物館（仮称）整備・運営事業 地盤調査）ボーリング柱状図PDFの最終版一覧。発注者から正式な確定版が発行された場合はこのファイルを更新すること。files[].file は preflight.py / verify_ai.py が探すファイル名（拡張子込み）。",
+  "project": "特別史跡加曽利貝塚新博物館（仮称）整備・運営事業 地盤調査",
+  "client_survey_company": "光貴基礎コンサルタント（株）",
+  "revision": "2026-08-19",
+  "expected_pages": 1,
+  "files": [
+    { "no": 1, "file": "No1_柱状図_32.40m_20260723.pdf", "depth_m": 32.40, "survey_period": "2026-07-21〜07-23", "note": "" },
+    { "no": 2, "file": "No2_柱状図_32.41m_20260727.pdf", "depth_m": 32.41, "survey_period": "2026-07-24〜07-27", "note": "" },
+    { "no": 3, "file": "No3_柱状図_29.42m_20260723.pdf", "depth_m": 29.42, "survey_period": "2026-07-21〜07-23", "note": "" },
+    { "no": 4, "file": "No4_柱状図_29.39m_20260727.pdf", "depth_m": 29.39, "survey_period": "2026-07-23〜07-27", "note": "" },
+    { "no": 5, "file": "No5_柱状図_29.35m_20260729.pdf", "depth_m": 29.35, "survey_period": "2026-07-28〜07-29", "note": "" },
+    { "no": 6, "file": "No6_柱状図_21.42m_20260730_修正.pdf", "depth_m": 21.42, "survey_period": "2026-07-29〜07-30", "note": "修正版。ファイル名の「修正」は出力側でも必ず残すこと" },
+    { "no": 7, "file": "No7_柱状図_17.43m_20260730.pdf", "depth_m": 17.43, "survey_period": "2026-07-30〜07-31", "note": "" },
+    { "no": 8, "file": "No8_柱状図_14.39m_20260803.pdf", "depth_m": 14.39, "survey_period": "2026-08-03", "note": "単独版・最終版として確定済み" }
+  ]
+}

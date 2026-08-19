@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+# 実データ（柱状図PDF・変換後の.ai）はリポジトリに入れない
+*.pdf
+*.ai
+reports/
+preview/
+conversion_log_*.txt
