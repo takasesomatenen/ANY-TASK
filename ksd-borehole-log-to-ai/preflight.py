@@ -14,6 +14,7 @@ import datetime as _dt
 import json
 import logging
 import os
+import re
 import sys
 import unicodedata
 
@@ -28,6 +29,9 @@ logging.getLogger("pypdf").setLevel(logging.CRITICAL)
 PT_TO_MM = 25.4 / 72.0
 # ページ内にテキストがこれ未満しか無ければ、ベクターPDFではなくスキャン画像の疑い。
 MIN_TEXT_CHARS = 50
+# 柱状図の本文から孔番号と総掘進長を拾って、manifest と食い違っていないか見るための正規表現。
+BOREHOLE_NAME_RE = re.compile(r"ボーリング名\s*No\.?\s*(\d+)")
+TOTAL_DEPTH_RE = re.compile(r"総掘進長\s*([0-9]+\.[0-9]+)\s*m")
 
 
 def load_manifest(path):
@@ -125,8 +129,12 @@ def count_images(resources, seen_xobjects=None):
     return total
 
 
-def inspect_pdf(path):
-    """1ファイル分の検査結果を dict で返す。errors は致命的、warnings は要確認。"""
+def inspect_pdf(path, entry=None):
+    """1ファイル分の検査結果を dict で返す。errors は致命的、warnings は要確認。
+
+    entry に manifest の1件を渡すと、PDF本文の孔番号・総掘進長と突き合わせて
+    「別の孔／別の深度の版を掴んでいないか」まで確認する。
+    """
     result = {
         "path": path,
         "size_bytes": os.path.getsize(path),
@@ -136,6 +144,8 @@ def inspect_pdf(path):
         "rotation": 0,
         "text_chars": 0,
         "image_count": 0,
+        "borehole_no_in_pdf": None,
+        "total_depth_in_pdf": None,
         "fonts": [],
         "non_embedded_fonts": [],
         "errors": [],
@@ -189,6 +199,26 @@ def inspect_pdf(path):
     fonts = collect_fonts(resources)
     result["fonts"] = sorted(fonts.values(), key=lambda f: f["base_font"])
     result["non_embedded_fonts"] = [f["base_font"] for f in result["fonts"] if not f["embedded"]]
+
+    # ファイル名と中身の食い違い（別の孔・浅い版を掴んでいないか）を見る。
+    # 書式が違って拾えないこともあるので、拾えたときだけ判定する。
+    name_match = BOREHOLE_NAME_RE.search(text)
+    depth_match = TOTAL_DEPTH_RE.search(text)
+    if name_match:
+        result["borehole_no_in_pdf"] = int(name_match.group(1))
+    if depth_match:
+        result["total_depth_in_pdf"] = float(depth_match.group(1))
+    if entry:
+        if result["borehole_no_in_pdf"] is not None and result["borehole_no_in_pdf"] != entry["no"]:
+            result["errors"].append(
+                "中身の孔番号が違う（PDF本文は No.%d、manifestは No.%d）。ファイルを取り違えている"
+                % (result["borehole_no_in_pdf"], entry["no"]))
+        if (result["total_depth_in_pdf"] is not None
+                and abs(result["total_depth_in_pdf"] - float(entry["depth_m"])) > 0.005):
+            result["errors"].append(
+                "総掘進長がファイル名と違う（PDF本文は %.2fm、想定は %.2fm）。"
+                "最終版ではない途中版の可能性がある"
+                % (result["total_depth_in_pdf"], float(entry["depth_m"])))
 
     if result["text_chars"] < MIN_TEXT_CHARS:
         result["errors"].append(
@@ -254,6 +284,10 @@ def build_markdown(report):
             out.append("- ⚠️ %s" % warn)
         if not item.get("errors") and not item.get("warnings"):
             out.append("- 問題なし")
+        if item.get("total_depth_in_pdf") is not None or item.get("borehole_no_in_pdf") is not None:
+            out.append("- 本文との照合: 孔番号 %s / 総掘進長 %s" % (
+                ("No.%d" % item["borehole_no_in_pdf"]) if item.get("borehole_no_in_pdf") else "取得不可",
+                ("%.2fm" % item["total_depth_in_pdf"]) if item.get("total_depth_in_pdf") else "取得不可"))
         if item.get("fonts"):
             out.append("- 使用フォント:")
             for font in item["fonts"]:
@@ -300,7 +334,7 @@ def main(argv=None):
             item["candidates"] = candidates
             items.append(item)
             continue
-        item.update(inspect_pdf(path))
+        item.update(inspect_pdf(path, entry))
         item["status"] = "ERROR" if item["errors"] else ("WARN" if item["warnings"] else "OK")
         items.append(item)
 
