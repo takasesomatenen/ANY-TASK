@@ -1,0 +1,23 @@
+{
+  "_comment": "Fill this in after running `--mode inspect` and reading results/inspect/<slug>_network.json in your browser's Network tab. If a location's availability calendar is backed by a plain JSON XHR/fetch call, add an entry here so `--mode api` can hit it directly instead of driving a full browser (faster, more stable, and gentler on the site). Leave a slug out (or set url to null) to fall back to --mode browser for it.",
+  "_template_example": {
+    "url": "https://en.earthboat.jp/api/availability",
+    "method": "GET",
+    "query_params": {
+      "location": "{slug}",
+      "checkin": "{checkin}",
+      "checkout": "{checkout}",
+      "guests": "{guests}"
+    },
+    "available_path": "data.available",
+    "price_path": "data.price"
+  },
+  "ueda_onsen": null,
+  "hakuba": null,
+  "togakushi": null,
+  "minakami_fujiwara": null,
+  "minakami_hodaigi": null,
+  "shirakabako": null,
+  "nojiriko": null,
+  "kurohime": null
+}
