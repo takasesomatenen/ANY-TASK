@@ -23,6 +23,7 @@ os.environ.setdefault("OPENAI_API_KEY", "sk-test-oai")
 
 import orchestrator as O  # noqa: E402
 
+O.BACKENDS.update({role: "api" for role in O.ROLES})
 O.ANTHROPIC_API_KEY = "sk-test-ant"
 O.GOOGLE_API_KEY = "test-goog"
 O.OPENAI_API_KEY = "sk-test-oai"
@@ -229,7 +230,8 @@ class MarkdownTest(unittest.TestCase):
     def test_markdown_contains_all_sections(self):
         md = O.to_markdown({
             "task": "T", "gemini": "G", "gpt": "P", "claude_review": "C",
-            "models": {"claude": "claude-opus-5", "gemini": "g", "gpt": "p"},
+            "engines": {"claude": "claude-opus-5", "gemini": "g", "gpt": "p"},
+            "backends": {"claude": "api", "gemini": "api", "gpt": "api"},
             "timestamp": "2026-01-01T00:00:00",
         })
         for expected in ("## タスク", "## Gemini の回答", "## GPT の回答",
@@ -269,6 +271,194 @@ class CliTest(unittest.TestCase):
         with mock.patch.object(O.requests, "request", fake_request(responses)), \
                 mock.patch.object(O.time, "sleep"), redirect_stdout(io.StringIO()):
             self.assertEqual(O.main(["タスク"]), 1)
+
+
+# ==========================================================================
+# CLI バックエンド
+# ==========================================================================
+
+class FakeProc:
+    def __init__(self, stdout="", stderr="", returncode=0):
+        self.stdout, self.stderr, self.returncode = stdout, stderr, returncode
+
+
+def fake_run(result, calls=None):
+    """subprocess.run の代役。result は FakeProc か送出する例外。"""
+    def _run(argv, **kwargs):
+        if calls is not None:
+            calls.append({"argv": argv, **kwargs})
+        if isinstance(result, Exception):
+            raise result
+        return result
+    return _run
+
+
+class CliArgvTest(unittest.TestCase):
+    def test_default_commands(self):
+        self.assertEqual(O.build_cli_argv("gemini", "やあ"), ["gemini", "-p", "やあ"])
+        self.assertEqual(O.build_cli_argv("gpt", "やあ"), ["codex", "exec", "やあ"])
+        self.assertEqual(O.build_cli_argv("claude", "やあ"), ["claude", "-p", "やあ"])
+
+    def test_env_override_with_placeholder(self):
+        with mock.patch.dict(os.environ, {"GEMINI_CLI_CMD": "mygem run --text={prompt} --json"}):
+            self.assertEqual(
+                O.build_cli_argv("gemini", "やあ"),
+                ["mygem", "run", "--text=やあ", "--json"],
+            )
+
+    def test_env_override_without_placeholder_appends(self):
+        with mock.patch.dict(os.environ, {"GPT_CLI_CMD": "mygpt ask"}):
+            self.assertEqual(O.build_cli_argv("gpt", "やあ"), ["mygpt", "ask", "やあ"])
+
+    def test_prompt_is_never_shell_interpreted(self):
+        # プロンプトはあくまで1個の argv 要素であり、分割されない
+        argv = O.build_cli_argv("gemini", "; rm -rf / && echo $HOME")
+        self.assertEqual(argv[-1], "; rm -rf / && echo $HOME")
+        self.assertEqual(len(argv), 3)
+
+    def test_empty_command_rejected(self):
+        with mock.patch.dict(os.environ, {"GPT_CLI_CMD": "   "}):
+            with self.assertRaises(O.CliError):
+                O.build_cli_argv("gpt", "x")
+
+
+class CliInvocationTest(unittest.TestCase):
+    def test_success_strips_ansi_and_whitespace(self):
+        proc = FakeProc(stdout="\x1b[32m回答本文\x1b[0m\n\n")
+        with mock.patch.object(O.subprocess, "run", fake_run(proc)):
+            self.assertEqual(O.call_cli("gemini", "x"), "回答本文")
+
+    def test_shell_is_not_used_and_stdin_is_closed(self):
+        calls = []
+        with mock.patch.object(O.subprocess, "run", fake_run(FakeProc("ok"), calls)):
+            O.call_cli("gemini", "x")
+        kwargs = calls[0]
+        # 対話待ちでハングしないよう stdin を塞ぐ
+        self.assertEqual(kwargs["stdin"], O.subprocess.DEVNULL)
+        self.assertNotIn("shell", kwargs)
+        self.assertEqual(kwargs["timeout"], O.CLI_TIMEOUT)
+
+    def test_command_not_found(self):
+        with mock.patch.object(O.subprocess, "run", fake_run(FileNotFoundError())):
+            with self.assertRaises(O.CliError) as cm:
+                O.call_cli("gemini", "x")
+        self.assertIn("コマンドが見つかりません", str(cm.exception))
+
+    def test_non_zero_exit(self):
+        proc = FakeProc(stdout="", stderr="not logged in", returncode=1)
+        with mock.patch.object(O.subprocess, "run", fake_run(proc)):
+            with self.assertRaises(O.CliError) as cm:
+                O.call_cli("gemini", "x")
+        self.assertIn("exit=1", str(cm.exception))
+        self.assertIn("not logged in", str(cm.exception))
+
+    def test_timeout(self):
+        exc = O.subprocess.TimeoutExpired(cmd="gemini", timeout=1)
+        with mock.patch.object(O.subprocess, "run", fake_run(exc)):
+            with self.assertRaises(O.CliError) as cm:
+                O.call_cli("gemini", "x", timeout=1)
+        self.assertIn("タイムアウト", str(cm.exception))
+
+    def test_empty_output(self):
+        with mock.patch.object(O.subprocess, "run", fake_run(FakeProc("  \n"))):
+            with self.assertRaises(O.CliError):
+                O.call_cli("gemini", "x")
+
+
+class CliBackendBehaviourTest(unittest.TestCase):
+    def test_worker_cli_failure_is_contained(self):
+        # ワーカーの CLI が失敗しても実行は止まらない
+        with mock.patch.object(O.subprocess, "run", fake_run(FileNotFoundError())):
+            out = O.call_gpt("x", backend="cli")
+        self.assertIn("GPT CLI失敗", out)
+        self.assertIn("コマンドが見つかりません", out)
+
+    def test_cli_backend_needs_no_api_key(self):
+        with mock.patch.object(O, "GOOGLE_API_KEY", None), \
+                mock.patch.object(O.subprocess, "run", fake_run(FakeProc("CLIの回答"))):
+            self.assertEqual(O.call_gemini("x", backend="cli"), "CLIの回答")
+
+    def test_supervisor_cli_failure_is_fatal(self):
+        # 監督者の失敗は封じ込めず送出する
+        with mock.patch.object(O.subprocess, "run", fake_run(FileNotFoundError())):
+            with self.assertRaises(O.CliError):
+                O.call_claude("x", backend="cli")
+
+    def test_mixed_backends(self):
+        """Gemini は CLI、GPT と Claude は API、という混在構成。"""
+        with mock.patch.object(O.requests, "request", fake_request(dict(ALL_OK))), \
+                mock.patch.object(O.subprocess, "run", fake_run(FakeProc("Gemini CLIの回答"))):
+            result = O.orchestrate("テスト", {"gemini": "cli", "gpt": "api", "claude": "api"})
+
+        self.assertEqual(result["gemini"], "Gemini CLIの回答")
+        self.assertEqual(result["gpt"], "GPTの回答本文")
+        self.assertEqual(result["claude_review"], "Claudeの統合結果")
+        self.assertEqual(result["backends"], {"gemini": "cli", "gpt": "api", "claude": "api"})
+        self.assertEqual(result["engines"]["gemini"], "gemini (CLI)")
+        self.assertEqual(result["engines"]["claude"], O.CLAUDE_MODEL)
+
+    def test_all_cli(self):
+        outputs = {"gemini": "G-CLI", "codex": "P-CLI", "claude": "C-CLI"}
+
+        def by_command(argv, **kwargs):
+            return FakeProc(outputs[argv[0]])
+
+        with mock.patch.object(O.subprocess, "run", by_command):
+            result = O.orchestrate("テスト", {r: "cli" for r in O.ROLES})
+
+        self.assertEqual(result["gemini"], "G-CLI")
+        self.assertEqual(result["gpt"], "P-CLI")
+        self.assertEqual(result["claude_review"], "C-CLI")
+        self.assertIn("gemini (CLI)", O.to_markdown(result))
+
+    def test_unknown_backend_rejected(self):
+        with self.assertRaises(ValueError):
+            O.call_gemini("x", backend="carrier-pigeon")
+
+    def test_workers_run_concurrently_on_cli(self):
+        import threading
+        barrier = threading.Barrier(2, timeout=5)
+
+        def slow_run(argv, **kwargs):
+            barrier.wait()  # 直列なら BrokenBarrierError
+            return FakeProc("ok")
+
+        with mock.patch.object(O.subprocess, "run", slow_run), \
+                mock.patch.object(O.requests, "request", fake_request(dict(ALL_OK))):
+            result = O.orchestrate("テスト", {"gemini": "cli", "gpt": "cli", "claude": "api"})
+        self.assertEqual(result["gemini"], "ok")
+
+
+class CliCliArgsTest(unittest.TestCase):
+    def test_backend_flag_applies_to_all_roles(self):
+        outputs = {"gemini": "G", "codex": "P", "claude": "C"}
+        with mock.patch.object(O.subprocess, "run",
+                               lambda argv, **kw: FakeProc(outputs[argv[0]])), \
+                redirect_stdout(io.StringIO()) as buf:
+            self.assertEqual(O.main(["タスク", "--backend", "cli"]), 0)
+        self.assertIn("gemini (CLI) [cli]", buf.getvalue())
+
+    def test_per_role_flag_overrides_global(self):
+        with mock.patch.object(O.requests, "request", fake_request(dict(ALL_OK))), \
+                mock.patch.object(O.subprocess, "run",
+                                  lambda argv, **kw: FakeProc("G-CLI")), \
+                redirect_stdout(io.StringIO()) as buf:
+            code = O.main(["タスク", "--gemini-backend", "cli"])
+        self.assertEqual(code, 0)
+        out = buf.getvalue()
+        self.assertIn("G-CLI", out)
+        self.assertIn("GPTの回答本文", out)
+
+    def test_cli_timeout_flag(self):
+        original = O.CLI_TIMEOUT
+        calls = []
+        try:
+            with mock.patch.object(O.subprocess, "run", fake_run(FakeProc("ok"), calls)), \
+                    redirect_stdout(io.StringIO()):
+                O.main(["タスク", "--backend", "cli", "--cli-timeout", "5"])
+            self.assertEqual(calls[0]["timeout"], 5)
+        finally:
+            O.CLI_TIMEOUT = original
 
 
 if __name__ == "__main__":
