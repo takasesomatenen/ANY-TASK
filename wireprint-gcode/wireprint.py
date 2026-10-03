@@ -30,6 +30,7 @@ Vec = tuple[float, float, float]
 @dataclass
 class Settings:
     # printer
+    printer: str = "generic"      # generic | a1mini
     bed_x: float = 220.0
     bed_y: float = 220.0
     nozzle_temp: int = 210
@@ -237,7 +238,47 @@ class Writer:
         self.move(p, s.travel_speed / 4)
 
 
+# Printer profiles: values that differ from Settings defaults.
+PRINTERS = {
+    "generic": {},
+    # Bambu Lab A1 mini: 180x180x180, bed slinger, compact hotend.
+    # 背の低い柱から試すため、1段 3.5 mm / クリアランス 4 mm と控えめにしている。
+    "a1mini": dict(bed_x=180.0, bed_y=180.0, nozzle_temp=220, bed_temp=60, retract=0.8,
+                   nozzle_clearance=4.0, hotend_radius=10.0, level_h=3.5, travel_speed=80.0),
+}
+
+
+def fan(s: Settings, value: int) -> str:
+    # Bambu firmware addresses the part-cooling fan as P1
+    return f"M106 P1 S{value}" if s.printer == "a1mini" else f"M106 S{value}"
+
+
+def fan_off(s: Settings) -> str:
+    return "M106 P1 S0" if s.printer == "a1mini" else "M107"
+
+
 def start_gcode(s: Settings) -> list[str]:
+    if s.printer == "a1mini":
+        return [
+            "; ---- start (Bambu Lab A1 mini) ----",
+            "; filament must already be loaded in the external spool / AMS lite slot in use",
+            "G90 ; absolute XYZ",
+            "M83 ; relative E",
+            f"M140 S{s.bed_temp}",
+            "M104 S150 ; warm nozzle without oozing while homing",
+            "G28 ; home all axes",
+            f"M190 S{s.bed_temp}",
+            f"M109 S{s.nozzle_temp}",
+            fan_off(s),
+            "G0 Z2 F600",
+            "G0 X20 Y3 F6000",
+            "G1 Z0.3 F600",
+            "G1 X100 Y3 E8 F1200 ; prime line along the front edge",
+            "G1 X100 Y3.5 F1200",
+            "G1 X20 Y3.5 E6 F1200",
+            "G1 E-0.8 F2400",
+            "G0 Z2 F600",
+        ]
     return [
         "; ---- start (generic Marlin / Klipper) ----",
         "G90 ; absolute XYZ",
@@ -247,7 +288,7 @@ def start_gcode(s: Settings) -> list[str]:
         "G28 ; home",
         f"M190 S{s.bed_temp}",
         f"M109 S{s.nozzle_temp}",
-        "M107",
+        fan_off(s),
         "G92 E0",
         "G0 Z2 F600",
         "G0 X5 Y20 F6000",
@@ -261,6 +302,17 @@ def start_gcode(s: Settings) -> list[str]:
 
 
 def end_gcode(s: Settings, top_z: float) -> list[str]:
+    if s.printer == "a1mini":
+        return [
+            "; ---- end ----",
+            "G1 E-2 F2400",
+            f"G0 Z{min(top_z + 15, 175):.2f} F600",
+            "G0 X0 Y170 F4000 ; present the bed slowly (the bed is the Y axis)",
+            "M104 S0",
+            "M140 S0",
+            fan_off(s),
+            "M84",
+        ]
     return [
         "; ---- end ----",
         "G1 E-2 F2400",
@@ -268,7 +320,7 @@ def end_gcode(s: Settings, top_z: float) -> list[str]:
         f"G0 X{s.bed_x / 2:.1f} Y{s.bed_y - 10:.1f} F6000",
         "M104 S0",
         "M140 S0",
-        "M107",
+        fan_off(s),
         "M84",
     ]
 
@@ -277,7 +329,7 @@ def generate(shape: Shape, s: Settings) -> Writer:
     w = Writer(s)
     for line in start_gcode(s):
         w.g(line)
-    w.pos = (5.5, 20.0, 2.0)
+    w.pos = (20.0, 3.5, 2.0) if s.printer == "a1mini" else (5.5, 20.0, 2.0)
     w.retracted = True
 
     # ---- base: printed normally so the pillars have something to stand on
@@ -286,7 +338,7 @@ def generate(shape: Shape, s: Settings) -> Writer:
         z = round(s.base_layer_h * (li + 1), 3)
         w.comment(f"BASE layer {li + 1}")
         if li == 1:
-            w.g("M106 S128")
+            w.g(fan(s, 128))
         for poly in layer:
             if len(poly) < 2:
                 continue
@@ -296,7 +348,7 @@ def generate(shape: Shape, s: Settings) -> Writer:
     base_top = z
 
     w.comment("WIRE PRINTING")
-    w.g("M106 S255 ; full fan for wires")
+    w.g(fan(s, 255) + " ; full fan for wires")
     # Base nodes count as touch-down points (nothing tall there yet)
     for k in range(shape.levels):
         z0 = base_top + k * s.level_h
@@ -356,6 +408,8 @@ def main(argv=None):
     ap.add_argument("--spacing", type=float, default=12.0)
     ap.add_argument("--taper", type=float, default=0.0, help="grid: 0..0.9 shrink toward the top")
     # printer
+    ap.add_argument("--printer", choices=sorted(PRINTERS), default="generic",
+                    help="a1mini = Bambu Lab A1 mini profile")
     ap.add_argument("--bed", type=float, nargs=2, metavar=("X", "Y"))
     ap.add_argument("--nozzle-temp", type=int)
     ap.add_argument("--bed-temp", type=int)
@@ -364,7 +418,7 @@ def main(argv=None):
     ap.add_argument("--hotend-radius", type=float)
     a = ap.parse_args(argv)
 
-    s = Settings()
+    s = Settings(printer=a.printer, **PRINTERS[a.printer])
     if a.level_h: s.level_h = a.level_h
     if a.bed: s.bed_x, s.bed_y = a.bed
     if a.nozzle_temp: s.nozzle_temp = a.nozzle_temp

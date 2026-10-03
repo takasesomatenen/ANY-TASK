@@ -10,6 +10,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 KINDS = {"base": 0, "up": 1, "down": 2, "bridge": 3, "travel": 4}
 
 PRESETS = [
+    ("a1-tiny", "A1 mini テスト① 2×2", ["--printer", "a1mini", "--shape", "grid", "--cols", "2", "--rows", "2", "--spacing", "10", "--levels", "3"]),
+    ("a1-grid", "A1 mini テスト② 3×3", ["--printer", "a1mini", "--shape", "grid", "--cols", "3", "--rows", "3", "--spacing", "10", "--levels", "5"]),
+    ("a1-tower", "A1 mini テスト③ 小タワー", ["--printer", "a1mini", "--shape", "tower", "--n", "10", "--radius", "12", "--bulge", "3", "--levels", "6"]),
     ("tower", "ラティス・タワー", ["--shape", "tower"]),
     ("twist", "ねじれタワー", ["--shape", "tower", "--twist", "6"]),
     ("grid", "柱のグリッド", ["--shape", "grid"]),

@@ -19,6 +19,20 @@ python3 build_preview.py   # preview.html（3Dツールパスビューア）を�
 
 `examples/` に生成済みの G-code があります（ベッド 220×220、PLA 210℃/60℃、汎用 Marlin/Klipper 用）。
 
+## Bambu Lab A1 mini で試す
+
+`--printer a1mini` で A1 mini 用の G-code になります（ベッド 180×180、Bambu のファン指定 `M106 P1`、1段 3.5 mm、220 ℃ / 60 ℃）。
+まずは小さいものから、上から順に試してください。
+
+| ファイル | 内容 | 高さ | 時間（加熱除く） |
+|---|---|---|---|
+| `examples/a1mini/1_tiny_2x2.gcode` | 柱4本 × 3段。できるかどうかの判定用 | 約11 mm | 約3分 |
+| `examples/a1mini/2_grid_3x3.gcode` | 柱9本 × 5段 | 約18 mm | 約9分 |
+| `examples/a1mini/3_mini_tower.gcode` | 直径約24〜30 mmの小さなタワー × 6段 | 約22 mm | 約8分 |
+
+印刷方法: Bambu Studio の「ファイル → インポート → G-code をインポート」で開き、プレビューを確認してから「プレート印刷」で送信します。
+フィラメント（PLA）は先に手動でロードしておいてください。この G-code は AMS lite の切り替えやフィラメントのロードを行いません。
+
 ## プリンタに合わせて調整するもの
 
 | オプション | 意味 | デフォルト |
