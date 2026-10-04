@@ -29,6 +29,7 @@ python3 build_preview.py   # preview.html（3Dツールパスビューア）を�
 | `examples/a1mini/1_tiny_2x2.gcode` | 柱4本 × 3段。できるかどうかの判定用 | 約11 mm | 約3分 |
 | `examples/a1mini/2_grid_3x3.gcode` | 柱9本 × 5段 | 約18 mm | 約9分 |
 | `examples/a1mini/3_mini_tower.gcode` | 直径約24〜30 mmの小さなタワー × 6段 | 約22 mm | 約8分 |
+| `examples/a1mini/4_cube_30mm.gcode` | 約3 cm 四方のトラス・キューブ（柱 4×4、間隔 10 mm × 8段） | 約29 mm | 約23分 |
 
 印刷方法: Bambu Studio の「ファイル → インポート → G-code をインポート」で開き、プレビューを確認してから「プレート印刷」で送信します。
 フィラメント（PLA）は先に手動でロードしておいてください。この G-code は AMS lite の切り替えやフィラメントのロードを行いません。
