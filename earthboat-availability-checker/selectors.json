@@ -1,0 +1,53 @@
+{
+  "_comment": "UNVERIFIED best-effort selectors. The environment that authored this script could not reach earthboat.jp (outbound access was blocked by org egress policy), so these were never checked against the real DOM. Run `python check_availability.py --mode inspect` once from a machine with normal internet access, look at results/inspect/<slug>.html and results/inspect/<slug>_network.json, and correct the arrays below before trusting --mode browser results.",
+
+  "checkin_input": [
+    "input[name*='checkin' i]",
+    "input[name*='check_in' i]",
+    "input#checkin",
+    "input[placeholder*='Check-in' i]",
+    "input[placeholder*='チェックイン']",
+    "input[type='date']"
+  ],
+  "checkout_input": [
+    "input[name*='checkout' i]",
+    "input[name*='check_out' i]",
+    "input#checkout",
+    "input[placeholder*='Check-out' i]",
+    "input[placeholder*='チェックアウト']"
+  ],
+  "guests_input": [
+    "select[name*='guest' i]",
+    "select[name*='people' i]",
+    "select[name*='person' i]",
+    "input[name*='guest' i]",
+    "input[name*='person' i]"
+  ],
+  "search_button": [
+    "button[type='submit']",
+    "button:has-text('Search')",
+    "button:has-text('検索')",
+    "button:has-text('空室')",
+    "button:has-text('Check availability')"
+  ],
+  "book_button": [
+    "button:has-text('予約')",
+    "button:has-text('Book')",
+    "button:has-text('Reserve')",
+    "a:has-text('予約')",
+    "a:has-text('Book')",
+    "a:has-text('Reserve')"
+  ],
+  "sold_out_keywords": [
+    "満室", "空室なし", "sold out", "no vacancy", "予約不可", "closed", "not available"
+  ],
+  "available_keywords": [
+    "空室あり", "ご予約はこちら", "book now", "予約する", "reserve now", "available"
+  ],
+  "price_container": [
+    ".price", "[class*='price' i]", "[class*='amount' i]", "[class*='fee' i]"
+  ],
+  "waitlist_keywords": [
+    "キャンセル待ち", "waitlist", "cancellation wait", "cancel wait"
+  ]
+}

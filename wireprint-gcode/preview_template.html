@@ -1,0 +1,237 @@
+<title>Wireprint Viewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Zen+Kaku+Gothic+New:wght@400;700&display=swap">
+<style>
+/* Layout: one dark workshop viewport, controls docked under it, notes below. Single dark look by choice. */
+:root {
+  --bg: #101113;
+  --panel: #18191c;
+  --line: #2a2c31;
+  --fg: #e9e6df;
+  --muted: #8d9199;
+  --accent: #f0a24a;
+  --wire-up: #f2efe8;
+  --wire-down: #8f959e;
+  --wire-base: #4c4f56;
+  --wire-travel: #3d6fd6;
+  --font-jp: "Zen Kaku Gothic New", "Hiragino Sans", "Noto Sans JP", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  color-scheme: dark;
+}
+html, body { background: var(--bg); color: var(--fg); }
+body { font-family: var(--font-jp); font-size: 15px; line-height: 1.7; padding-inline: 16px; padding-block: 20px 48px; }
+.wrap { max-width: 1040px; margin-inline: auto; display: grid; gap: 18px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 24px; }
+h1 { font-family: var(--font-mono); font-weight: 500; font-size: 1.35rem; letter-spacing: .02em; margin: 0; }
+h1 span { color: var(--accent); }
+.sub { color: var(--muted); font-size: .9rem; margin: 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs button, .ctl button {
+  font: inherit; font-size: .88rem; color: var(--fg); background: var(--panel);
+  border: 1px solid var(--line); border-radius: 4px; padding: 5px 12px; cursor: pointer;
+}
+.tabs button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+button:focus-visible, input:focus-visible, label:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stage { position: relative; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bg); }
+#view { display: block; width: 100%; aspect-ratio: 4 / 3; max-height: 72vh; max-width: 100%; touch-action: none; }
+.hud { position: absolute; left: 12px; top: 10px; font-family: var(--font-mono); font-size: .78rem; color: var(--muted); pointer-events: none; font-variant-numeric: tabular-nums; }
+.hud b { color: var(--fg); font-weight: 500; }
+.legend { position: absolute; right: 12px; top: 10px; display: grid; gap: 2px; font-size: .78rem; color: var(--muted); pointer-events: none; }
+.legend i { display: inline-block; width: 18px; height: 2px; vertical-align: middle; margin-right: 6px; }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.ctl input[type=range] { flex: 1 1 240px; accent-color: var(--accent); min-width: 0; }
+.ctl label { font-size: .85rem; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+.cmd { font-family: var(--font-mono); font-size: .82rem; background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 8px 12px; overflow-x: auto; white-space: nowrap; color: var(--fg); }
+.cmd small { color: var(--muted); }
+.notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 24px; }
+.notes > div { min-width: 0; }
+h2 { font-size: 1rem; margin: 0 0 6px; text-wrap: balance; }
+ol, ul { margin: 0; padding-left: 1.3em; color: var(--fg); }
+li { margin-bottom: 4px; }
+li::marker { color: var(--muted); font-family: var(--font-mono); }
+code { font-family: var(--font-mono); font-size: .85em; color: var(--accent); }
+.muted { color: var(--muted); font-size: .88rem; }
+@media (max-width: 640px) {
+  #view { aspect-ratio: 1 / 1; }
+  .hud { font-size: .7rem; right: 12px; }
+  .legend { position: static; display: flex; flex-wrap: wrap; gap: 2px 14px; padding: 8px 12px; border-top: 1px solid var(--line); }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>wire<span>/</span>print</h1>
+      <p class="sub">Z軸だけで柱を立てて、頂点どうしを空中で橋渡しする G-code のツールパス</p>
+    </div>
+    <div class="tabs" id="tabs" role="group" aria-label="形状"></div>
+  </header>
+
+  <div class="stage">
+    <canvas id="view"></canvas>
+    <div class="hud" id="hud"></div>
+    <div class="legend">
+      <span><i style="background:var(--wire-up)"></i>柱（Z上昇＋押出）</span>
+      <span><i style="background:var(--wire-down)"></i>斜めブレース</span>
+      <span><i style="background:var(--accent)"></i>空中の橋</span>
+      <span><i style="background:var(--wire-base)"></i>土台（通常プリント）</span>
+      <span><i style="background:var(--wire-travel)"></i>移動</span>
+    </div>
+  </div>
+
+  <div class="ctl">
+    <button id="play" type="button">▶ 再生</button>
+    <input id="prog" type="range" min="0" max="100" value="100" aria-label="プリントの進行">
+    <label><input id="trav" type="checkbox"> 移動を表示</label>
+    <label><input id="file" type="file" accept=".json" hidden><span style="text-decoration:underline">自分のJSONを読み込む</span></label>
+  </div>
+
+  <div class="cmd" id="cmd"></div>
+
+  <section class="notes">
+    <div>
+      <h2>1段ごとの動き</h2>
+      <ol>
+        <li>根元でノズルを止めて少し押し出し、土台に溶着</li>
+        <li>XYは固定、Zだけ 3 mm/s で上げながら押し出して柱を立てる</li>
+        <li>頂点で 0.8 秒停止。ファン全開で固める</li>
+        <li>押し出しながら斜めに降りて、隣の柱の根元へ（三角形の補強）</li>
+        <li>全部の柱が立ったら、頂点から頂点へ 6 mm/s で水平に橋をかける</li>
+        <li>その橋の高さを次の段の「土台」にして繰り返す</li>
+      </ol>
+    </div>
+    <div>
+      <h2>失敗しないためのポイント</h2>
+      <ul>
+        <li>1段の高さはノズル先端〜ヒーターブロック下面の距離より低く。デフォルトは 4.5 mm（クリアランス 5 mm 想定）</li>
+        <li>スクリプトがヒートブロックと既存のワイヤーの干渉を検査し、ぶつかる場合は警告</li>
+        <li>PLAで、冷却ファンは強いほど良い。垂れるなら <code>top_delay</code> を伸ばすか温度を 5 ℃下げる</li>
+        <li>糸が細すぎて切れるなら <code>strand_d</code> を 0.6 に</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const DATA = /*__DATA__*/null;
+const css = getComputedStyle(document.documentElement);
+const tok = n => new THREE.Color(css.getPropertyValue(n).trim());
+const COLORS = [tok('--wire-base'), tok('--wire-up'), tok('--wire-down'), tok('--accent'), tok('--wire-travel')];
+
+const canvas = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const scene = new THREE.Scene();
+scene.background = tok('--bg');
+const camera = new THREE.PerspectiveCamera(35, 4 / 3, 0.1, 2000);
+const controls = new THREE.OrbitControls(camera, canvas);
+controls.enableDamping = true;
+
+const grid = new THREE.GridHelper(120, 24, tok('--line'), tok('--line'));
+scene.add(grid);
+const nozzle = new THREE.Mesh(new THREE.ConeGeometry(2.2, 5, 24), new THREE.MeshBasicMaterial({ color: tok('--accent'), transparent: true, opacity: .55 }));
+nozzle.rotation.x = Math.PI; scene.add(nozzle);
+
+let cur = null, playing = false;
+const prog = document.getElementById('prog'), trav = document.getElementById('trav');
+
+function build(seg) {
+  const n = seg.length / 7;
+  const P = [], C = [], T = [], pre = [], preT = [], ends = [];
+  let np = 0, nt = 0, top = 0;
+  for (let i = 0; i < n; i++) {
+    const o = i * 7, k = seg[o];
+    // gcode (x, y, z) -> three (x, z, -y)
+    const a = [seg[o + 1], seg[o + 3], -seg[o + 2]], b = [seg[o + 4], seg[o + 6], -seg[o + 5]];
+    pre.push(np); preT.push(nt); ends.push(b);
+    top = Math.max(top, a[1], b[1]);
+    if (k === 4) { T.push(...a, ...b); nt++; }
+    else { P.push(...a, ...b); const c = COLORS[k]; C.push(c.r, c.g, c.b, c.r, c.g, c.b); np++; }
+  }
+  pre.push(np); preT.push(nt);
+  const gp = new THREE.BufferGeometry();
+  gp.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+  gp.setAttribute('color', new THREE.Float32BufferAttribute(C, 3));
+  const gt = new THREE.BufferGeometry();
+  gt.setAttribute('position', new THREE.Float32BufferAttribute(T, 3));
+  const lp = new THREE.LineSegments(gp, new THREE.LineBasicMaterial({ vertexColors: true }));
+  const lt = new THREE.LineSegments(gt, new THREE.LineBasicMaterial({ color: COLORS[4], transparent: true, opacity: .35 }));
+  return { n, lp, lt, pre, preT, ends, top };
+}
+
+function show(seg, info, cmd) {
+  if (cur) { scene.remove(cur.lp, cur.lt); cur.lp.geometry.dispose(); cur.lt.geometry.dispose(); }
+  cur = build(seg);
+  scene.add(cur.lp, cur.lt);
+  prog.max = cur.n; prog.value = cur.n;
+  const h = cur.top;
+  controls.target.set(0, h * 0.42, 0);
+  camera.position.set(h * 1.3 + 40, h * 0.95 + 20, h * 1.5 + 50);
+  document.getElementById('cmd').innerHTML = cmd ? `<small>$</small> ${cmd} <small>-o out.gcode</small>` : '<small>読み込んだJSON</small>';
+  document.getElementById('hud').dataset.info = info || '';
+  update();
+}
+
+function update() {
+  if (!cur) return;
+  const p = +prog.value;
+  cur.lp.geometry.setDrawRange(0, cur.pre[p] * 2);
+  cur.lt.geometry.setDrawRange(0, cur.preT[p] * 2);
+  cur.lt.visible = trav.checked;
+  const e = cur.ends[Math.max(0, p - 1)];
+  nozzle.position.set(e[0], e[1] + 2.5, e[2]);
+  nozzle.visible = p < cur.n;
+  const hud = document.getElementById('hud');
+  hud.innerHTML = `<b>${hud.dataset.info}</b><br>move ${p.toLocaleString()} / ${cur.n.toLocaleString()} · Z ${e[1].toFixed(1)} mm`;
+}
+
+function resize() {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(canvas);
+
+const tabs = document.getElementById('tabs');
+Object.entries(DATA).forEach(([key, d], i) => {
+  const b = document.createElement('button');
+  b.type = 'button'; b.textContent = d.label; b.setAttribute('aria-pressed', i === 0);
+  b.onclick = () => { tabs.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); playing = false; setPlay(); show(d.seg, d.info, d.cmd); };
+  tabs.appendChild(b);
+});
+const first = Object.values(DATA)[0];
+show(first.seg, first.info, first.cmd);
+
+const playBtn = document.getElementById('play');
+function setPlay() { playBtn.textContent = playing ? '❚❚ 停止' : '▶ 再生'; }
+playBtn.onclick = () => { if (!playing && +prog.value >= cur.n) prog.value = 0; playing = !playing; setPlay(); };
+prog.oninput = () => { playing = false; setPlay(); update(); };
+trav.onchange = update;
+
+const KIND = { base: 0, up: 1, down: 2, bridge: 3, travel: 4 };
+document.getElementById('file').onchange = async ev => {
+  const f = ev.target.files[0]; if (!f) return;
+  try {
+    const d = JSON.parse(await f.text());
+    const cx = d.bed[0] / 2, cy = d.bed[1] / 2, seg = [];
+    for (const s of d.segments) seg.push(KIND[s.t], s.a[0] - cx, s.a[1] - cy, s.a[2], s.b[0] - cx, s.b[1] - cy, s.b[2]);
+    tabs.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', false));
+    show(seg, `${f.name} · ${d.height.toFixed(1)} mm`, '');
+  } catch (e) { document.getElementById('cmd').textContent = 'JSONを読めませんでした。wireprint.py の --preview で出力したファイルを選んでください。'; }
+};
+
+const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+(function loop() {
+  requestAnimationFrame(loop);
+  if (playing && cur) {
+    const step = Math.max(1, Math.round(cur.n / (reduce ? 120 : 900)));
+    prog.value = Math.min(cur.n, +prog.value + step);
+    if (+prog.value >= cur.n) { playing = false; setPlay(); }
+    update();
+  }
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
