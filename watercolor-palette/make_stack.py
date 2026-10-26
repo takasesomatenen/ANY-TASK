@@ -1,8 +1,9 @@
-"""2段スリーブ + 無印クリームケースL用の穴あきパレットの STL を生成する。
+"""15mm マスのパレットを 2 枚入れる 2 段スリーブの STL を生成する。
 
-- holed_palette_15mm.stl : 中央にクリームケースが通る穴、四隅に 4 マス
-- sleeve_2tier_15mm.stl  : 断面「日」の字の 2 段スリーブ。天板と中段の仕切りに
-                           同じ穴、底板はただの板。縦置き印刷の向きで出力
+- sleeve_2tier_15mm.stl : 断面「日」の字の 2 段スリーブ。天板と中段の仕切りに
+                          雫型の穴、底板はただの板。縦置き印刷の向きで出力
+パレットを抜いた空のスリーブには、無印良品のクリームケース L が穴に
+はまって立つ (滑り止めの固定台として流用できる)。
 使い方: python3 make_stack.py
 依存: pip install trimesh manifold3d numpy
 """
@@ -23,9 +24,6 @@ HOLE_R = CASE_D / 2 + HOLE_CLEAR      # = 25.5
 SIZE = 4 * 15.0 + 3 * 1.2 + 2 * 2.0   # 67.6
 FLOOR, DEPTH = 1.5, 5.0
 PAL_H = FLOOR + DEPTH                 # 6.5
-OUTER_WALL, INNER_WALL = 2.0, 1.2
-OUTER_R = 3.0
-CELL_R = 2.0                          # マスの角と底フチの丸み
 
 # ---- スリーブ ----
 CLEAR_SIDE, CLEAR_TOP = 0.4, 0.3
@@ -41,40 +39,6 @@ def to_trimesh(man):
 
 def rounded_square(w, h, r):
     return CrossSection.square([w - 2 * r, h - 2 * r], center=True).offset(r, JoinType.Round, circular_segments=SEG)
-
-
-def round_all(cs, r):
-    """凸角・凹角の両方を半径 r で丸める。"""
-    return (cs.offset(-r, JoinType.Round, circular_segments=SEG)
-              .offset(2 * r, JoinType.Round, circular_segments=SEG)
-              .offset(-r, JoinType.Round, circular_segments=SEG))
-
-
-# ================= 穴あきパレット =================
-def holed_palette():
-    body = Manifold.extrude(rounded_square(SIZE, SIZE, OUTER_R), PAL_H)
-    ring_r = HOLE_R + INNER_WALL
-    inner = SIZE / 2 - OUTER_WALL
-    pockets = []
-    for sx in (1, -1):
-        for sy in (1, -1):
-            quad = CrossSection.square([inner - INNER_WALL / 2] * 2).translate([INNER_WALL / 2] * 2)
-            quad = quad.scale([sx, sy])
-            cell = round_all(quad - CrossSection.circle(ring_r, SEG), CELL_R)
-            # 底フチの丸み: 段階的に内側へオフセットした柱を重ねる (階段状に近似)
-            steps = 10
-            for i in range(steps):
-                z0 = FLOOR + CELL_R * i / steps
-                dz = CELL_R - CELL_R * (i + 0.5) / steps
-                inset = CELL_R - math.sqrt(max(CELL_R**2 - dz**2, 0))
-                layer = cell.offset(-inset, JoinType.Round, circular_segments=SEG)
-                pockets.append(Manifold.extrude(layer, PAL_H + 1 - z0).translate([0, 0, z0]))
-            pockets.append(Manifold.extrude(cell, PAL_H).translate([0, 0, FLOOR + CELL_R]))
-    hole = Manifold.cylinder(PAL_H + 2, HOLE_R, HOLE_R, SEG).translate([0, 0, -1])
-    out = body - hole
-    for p in pockets:
-        out = out - p
-    return out.simplify(0.005)  # 近接した頂点をまとめて縮退面をなくす
 
 
 # ================= 2段スリーブ =================
@@ -114,9 +78,6 @@ def sleeve_2tier():
 
 
 if __name__ == "__main__":
-    p = to_trimesh(holed_palette())
-    p.export("holed_palette_15mm.stl")
-    print(f"holed_palette_15mm.stl: {SIZE} x {SIZE} x {PAL_H} mm, hole Ø{2*HOLE_R}, watertight={p.is_watertight}")
     s_man, (w, h, l, tiers, th) = sleeve_2tier()
     s = to_trimesh(s_man)
     s.export("sleeve_2tier_15mm.stl")
