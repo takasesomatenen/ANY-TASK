@@ -64,14 +64,13 @@ def sleeve_2tier():
     # 天板と中段に穴。縦置き印刷で穴の上側が垂れないよう、上端だけ 45° のとんがりにする
     circle = CrossSection.circle(HOLE_R, SEG)
     apex = CrossSection.square([0.01, 0.01], center=True).translate([0, HOLE_R * math.sqrt(2)])
-    tip = CrossSection.batch_hull([circle, apex])
-    # とんがりの先は平らに切って、筒の端に 3mm 以上の壁を残す (短いブリッジで済む)
-    flat_y = min(HOLE_R * math.sqrt(2) - 3.0, length / 2 - 3.0)
-    tip = tip - CrossSection.square([HOLE_R * 4, HOLE_R], center=True).translate([0, flat_y + HOLE_R / 2])
+    tip = CrossSection.batch_hull([circle, apex])       # 先端まで鋭くとがった雫型
+    # 雫の先 (中心から R√2) まで入るよう、穴を筒の中で下寄せし上下の残り壁を揃える
+    hole_z = (length - HOLE_R * math.sqrt(2) + HOLE_R) / 2
     teardrop = Manifold.extrude(tip, outer_h)            # XY 平面の形を Z 方向に押し出し
     teardrop = teardrop.rotate([90, 0, 0])               # 穴の軸を Y に、とんがりを +Z に
     y_start = tiers[0] + tier_h / 2 - 0.01               # 中段の仕切りの下面から上に開ける (底板は残す)
-    teardrop = teardrop.translate([0, y_start + outer_h, length / 2])
+    teardrop = teardrop.translate([0, y_start + outer_h, hole_z])
     body = body - (teardrop ^ Manifold.cube([outer_w * 2, outer_h, length * 2], center=True)
                    .translate([0, y_start + outer_h / 2, length / 2]))
     return body.simplify(0.005), (outer_w, outer_h, length, tiers, tier_h)
